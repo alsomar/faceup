@@ -13,22 +13,20 @@ module ASM_Extensions
 
       def activate
         model = Sketchup.active_model
-
-        # Recuperar configuraciones guardadas o establecer valores por defecto
-        @group_creation_enabled = model.get_attribute('ExtruderTool', 'group_creation_enabled', true)
-        @show_faces = model.get_attribute('ExtruderTool', 'show_faces', true)
-      
         selection = model.selection
         @selected_faces = selection.grep(Sketchup::Face)
-        
+
         if @selected_faces.empty?
-          Sketchup::set_status_text("No hay caras seleccionadas.", SB_PROMPT)
-        else
-          @preview = true
-          update_vcb
-          model.active_view.invalidate if @preview # Forzar actualización
+          UI.messagebox("No faces selected.")
+          Sketchup.active_model.select_tool(nil)
+          return
         end
-        
+
+        @show_faces = model.get_attribute('ExtruderTool', 'show_faces', true)
+        @preview = true
+        update_vcb
+        model.active_view.invalidate if @preview
+                
         update_status_text
       end
       
@@ -81,29 +79,23 @@ module ASM_Extensions
           apply_extrusion(view)
           reset_tool
         else
-          Sketchup::set_status_text("Introduce una distancia y presiona Enter.", SB_PROMPT)
+          Sketchup::set_status_text("Enter a lenght and press Enter.", SB_PROMPT)
         end
       end
 
       def onUserText(text, view)
         begin
           distance = text.to_l
-          if distance > 0
-            @extrusion_distance = distance
-            @distance_entered = true
-            Sketchup::set_status_text("Presiona Enter para confirmar la extrusión.", SB_PROMPT)
-            view.invalidate
-          else
-            Sketchup::set_status_text("Por favor, introduce un valor positivo.", SB_VCB_VALUE)
-          end
-        rescue
-          Sketchup::set_status_text("Entrada inválida. Por favor, introduce una distancia válida.", SB_VCB_VALUE)
+          @extrusion_distance = distance
+          @distance_entered = true
+          Sketchup::set_status_text("Press Enter to confirm the extrusion.", SB_PROMPT)
+          view.invalidate
         end
       end
       
       def update_status_text
-        mode = @show_faces ? "CARAS" : "ARISTAS"
-        @status_text = "Herramienta de Extrusión: Selecciona una cara y ajusta la distancia de extrusión | Previsualización en modo #{mode} (Presiona TAB para cambiar)"
+        mode = @show_faces ? "FACE" : "EDGE"
+        @status_text = "Extruder: Adjust the extrusion distance | Preview in #{mode} mode (Press TAB to change)"
         Sketchup::set_status_text(@status_text)
       end
       
@@ -240,7 +232,7 @@ module ASM_Extensions
       end
 
       def update_vcb(label=nil, value = nil)
-        label ||= "Distancia de extrusión: " 
+        label ||= "Lenght: " 
         value ||= @extrusion_distance.to_s  
     
         Sketchup::set_status_text(label,SB_VCB_LABEL)
