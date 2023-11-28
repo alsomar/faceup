@@ -15,8 +15,8 @@ module ASM_Extensions
         model = Sketchup.active_model
 
         # Recuperar configuraciones guardadas o establecer valores por defecto
-        @group_creation_enabled = model.get_attribute('ExtruderToolv5', 'group_creation_enabled', true)
-        @show_faces = model.get_attribute('ExtruderToolv5', 'show_faces', true)
+        @group_creation_enabled = model.get_attribute('ExtruderTool', 'group_creation_enabled', true)
+        @show_faces = model.get_attribute('ExtruderTool', 'show_faces', true)
       
         selection = model.selection
         @selected_faces = selection.grep(Sketchup::Face)
@@ -63,17 +63,10 @@ module ASM_Extensions
         model = Sketchup.active_model
         if key == 9 # Tecla TAB
           @show_faces = !@show_faces
-          model.set_attribute('ExtruderToolv5', 'show_faces', @show_faces)
+          model.set_attribute('ExtruderTool', 'show_faces', @show_faces)
           update_status_text  # Actualizar la barra de estado
           update_vcb          # Actualiza el VCB
           view.invalidate     # Actualiza la vista
-        end
-
-        if key == 16  # Tecla SHIFT
-          @group_creation_enabled = !@group_creation_enabled
-          model.set_attribute('ExtruderToolv5', 'group_creation_enabled', @group_creation_enabled)
-          update_status_text  # Opcional: actualizar la barra de estado para reflejar el cambio
-          view.invalidate     # Refrescar la vista
         end
       end
 
@@ -109,9 +102,8 @@ module ASM_Extensions
       end
       
       def update_status_text
-        group_mode = @group_creation_enabled ? "GRUPOS" : "CARAS"
         mode = @show_faces ? "CARAS" : "ARISTAS"
-        @status_text = "Herramienta de Extrusión: Selecciona una cara y ajusta la distancia de extrusión | Geometría en modo #{group_mode} (Presiona SHIFT para cambiar) | Previsualización en modo #{mode} (Presiona TAB para cambiar)"
+        @status_text = "Herramienta de Extrusión: Selecciona una cara y ajusta la distancia de extrusión | Previsualización en modo #{mode} (Presiona TAB para cambiar)"
         Sketchup::set_status_text(@status_text)
       end
       
@@ -198,17 +190,9 @@ module ASM_Extensions
         model = Sketchup.active_model
         model.start_operation('Apply Extruder', true)
         
-        if @group_creation_enabled
-          # Modo grupos
-          groups = face2group(@selected_faces)
-          xtrd_groups(groups, @extrusion_distance)
-          model.selection.add(groups)
-        else
-          # Modo caras
-          new_entities = xtrd_faces
-          model.selection.clear
-          model.selection.add(new_entities)
-        end
+        groups = face2group(@selected_faces)
+        xtrd_groups(groups, @extrusion_distance)
+        model.selection.add(groups)
         
         model.commit_operation
         @preview = false
@@ -244,36 +228,6 @@ module ASM_Extensions
           face = group.entities.grep(Sketchup::Face).first
           face.pushpull(height) if face
         end
-      end
-
-      def xtrd_faces
-        model = Sketchup.active_model
-        new_entities = []
-      
-        @selected_faces.each do |face|
-          next unless face.valid?
-      
-          # Agregar la cara original y sus aristas al contenedor
-          new_entities << face
-          new_entities.concat(face.edges)
-      
-          # Recolectar las entidades antes de la extrusión
-          pre_extrusion_entities = model.entities.to_a
-      
-          # Realizar la extrusión con la opción de copia
-          face.pushpull(@extrusion_distance, true)
-      
-          # Invertir la cara original
-          face.reverse!
-      
-          # Recolectar las entidades después de la extrusión
-          post_extrusion_entities = model.entities.to_a
-      
-          # Agregar a new_entities solo aquellas entidades que son nuevas
-          new_entities.concat(post_extrusion_entities - pre_extrusion_entities)
-        end
-      
-        new_entities.uniq
       end
 
       def reset_tool
