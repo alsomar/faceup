@@ -1,6 +1,5 @@
-# FaceUp Extension for SketchUp
+# FaceUp for SketchUp
 
-## Overview
 FaceUp is a SketchUp extension aimed at simplifying the process of face creation from edges and offering efficient face extrusion capabilities.
 
 ## Features
