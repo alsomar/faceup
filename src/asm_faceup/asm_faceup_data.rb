@@ -200,11 +200,11 @@ module ASM_Extensions
   
         faces.each do |face|
         outer_edges = face.outer_loop.edges
-        if face.edges.any? { |edge| !outer_edges.include?(edge) }
-          faces_with_inner_edges << face
-        else
-          faces_without_inner_edges << face
-        end
+          if face.edges.any? { |edge| !outer_edges.include?(edge) }
+            faces_with_inner_edges << face
+          else
+            faces_without_inner_edges << face
+          end
         end
   
         groups_with_inner_edges = faces_with_inner_edges.sort_by { |face| -face.area }.map do |face|
@@ -219,11 +219,16 @@ module ASM_Extensions
       end
 
       def xtrd_groups(groups, height)
+        default_layer = Sketchup.active_model.layers[0] 
+      
         groups.each do |group|
+          group.entities.grep(Sketchup::Face).each { |face| face.layer = default_layer }
+          group.entities.grep(Sketchup::Edge).each { |edge| edge.layer = default_layer }
+      
           face = group.entities.grep(Sketchup::Face).first
           face.pushpull(height) if face
         end
-      end
+      end      
 
       def reset_tool
         @selected_faces = []
