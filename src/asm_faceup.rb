@@ -5,7 +5,7 @@ module ASM_Extensions
 
     # Variables
     PLUGIN_NAME = 'FaceUp'.freeze
-    PLUGIN_VERSION = '1.0.0'.freeze
+    PLUGIN_VERSION = '1.0.1'.freeze
     PLUGIN_DESCRIPTION = 'Streamlined face creation from edges and efficient face extrusion.'.freeze
     PLUGIN_AUTHOR = 'Alejandro Soriano'.freeze
     PLUGIN_ID = File.basename(__FILE__, '.*')
