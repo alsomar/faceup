@@ -79,7 +79,7 @@ module ASM_Extensions
           apply_extrusion(view)
           reset_tool
         else
-          Sketchup::set_status_text("Enter a lenght and press Enter.", SB_PROMPT)
+          Sketchup::set_status_text("Enter a length and press Enter.", SB_PROMPT)
         end
       end
 
@@ -232,7 +232,7 @@ module ASM_Extensions
       end
 
       def update_vcb(label=nil, value = nil)
-        label ||= "Lenght: " 
+        label ||= "length: " 
         value ||= @extrusion_distance.to_s  
     
         Sketchup::set_status_text(label,SB_VCB_LABEL)
