@@ -1,4 +1,4 @@
-require 'extensions'
+require 'extensions' unless defined?(SketchupExtension)
 
 module ASM_Extensions
   module FaceUp
