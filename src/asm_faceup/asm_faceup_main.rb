@@ -16,7 +16,10 @@ module ASM_Extensions
         selection = model.selection
 
         if selection.grep(Sketchup::Edge).any? || selection.grep(Sketchup::Face).any?
-          context_menu.add_item("Summon Faces") { activate_summonfaces }
+          faceup_menu = context_menu.add_submenu("FaceUp")
+          
+          faceup_menu.add_item("Summon Faces") { activate_summonfaces }
+          faceup_menu.add_item("Extruder") { activate_extruder }
         end
       end
     end
