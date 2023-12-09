@@ -10,6 +10,18 @@ module ASM_Extensions
       ASM_Extensions::FaceUp::SummonFaces.summonfaces
     end
 
+    def self.activate_turbo
+      model = Sketchup.active_model
+      model.start_operation('FaceUp: Summon + Extruder', true)
+
+      begin
+        activate_summonfaces
+        activate_extruder
+      ensure
+        model.commit_operation
+      end
+    end
+
     def self.add_context_menu_handler
       UI.add_context_menu_handler do |context_menu|
         model = Sketchup.active_model
@@ -21,6 +33,7 @@ module ASM_Extensions
           faceup_menu.add_separator
           faceup_menu.add_item("Summon Faces") { activate_summonfaces }
           faceup_menu.add_item("Extruder") { activate_extruder }
+          faceup_menu.add_item("Summon + Extruder") { activate_turbo }
         end
       end
     end
@@ -28,7 +41,8 @@ module ASM_Extensions
     unless file_loaded?(__FILE__)
       menu = UI.menu('Extensions').add_submenu("FaceUp")
       menu.add_item('Summon Faces') { activate_summonfaces }
-      menu.add_item('Extruder') { activate_extruder }
+      menu.add_item('Face Extruder') { activate_extruder }
+      menu.add_item('Summon + Extruder') { activate_turbo }
       file_loaded(__FILE__)
     end
 

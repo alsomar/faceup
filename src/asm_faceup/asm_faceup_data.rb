@@ -181,7 +181,7 @@ module ASM_Extensions
   
       def apply_extrusion(view)
         model = Sketchup.active_model
-        model.start_operation('Apply Extruder', true)
+        model.start_operation('FaceUp: Extruder', true)
         
         groups = face2group(@selected_faces)
         xtrd_groups(groups, @extrusion_distance)
@@ -258,7 +258,7 @@ module ASM_Extensions
         presel_edges = selection.grep(Sketchup::Edge)
       
         unless presel_edges.empty?
-          model.start_operation("Summon Faces", true)
+          model.start_operation("FaceUp: Summon Faces", true)
           new_faces = create_faces(presel_edges)
           orient_faces(new_faces)
           update_selection(selection, presel_faces, new_faces)
