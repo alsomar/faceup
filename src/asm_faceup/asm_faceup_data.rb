@@ -4,8 +4,9 @@ module ASM_Extensions
     class ExtruderTool
   
       def initialize
+        model = Sketchup.active_model
         @selected_faces = []
-        @extrusion_distance = 1.m
+        @extrusion_distance = model.get_attribute('ASM_Extensions_FaceUp', 'last_extrusion_distance', 1.m)
         @preview = false
         @status_text = ""
         @distance_entered = false
@@ -185,6 +186,8 @@ module ASM_Extensions
         groups = face2group(@selected_faces)
         xtrd_groups(groups, @extrusion_distance)
         model.selection.add(groups)
+
+        model.set_attribute('ASM_Extensions_FaceUp', 'last_extrusion_distance', @extrusion_distance)
         
         model.commit_operation
         @preview = false
@@ -250,7 +253,7 @@ module ASM_Extensions
         presel_edges = selection.grep(Sketchup::Edge)
       
         unless presel_edges.empty?
-          model.start_operation("Face Creator", true)
+          model.start_operation("Summon Faces", true)
           new_faces = create_faces(presel_edges)
           orient_faces(new_faces)
           update_selection(selection, presel_faces, new_faces)
