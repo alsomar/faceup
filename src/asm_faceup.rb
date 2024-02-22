@@ -1,31 +1,47 @@
-require 'extensions' unless defined?(SketchupExtension)
+require 'json'
+require 'sketchup'
+require 'extensions'
 
 module ASM_Extensions
   module FaceUp
 
-    # Variables
-    PLUGIN_NAME = 'FaceUp'.freeze
-    PLUGIN_VERSION = '1.0.1'.freeze
-    PLUGIN_DESCRIPTION = 'Streamlined face creation from edges and efficient face extrusion.'.freeze
-    PLUGIN_AUTHOR = 'Alejandro Soriano'.freeze
-    PLUGIN_ID = File.basename(__FILE__, '.*')
+    file = __FILE__.dup
+    folder_name = File.basename(file, '.*')
 
     # Paths
-    PATH_ROOT = File.dirname(__FILE__)
-    FILE_DATA = File.join(PATH_ROOT, PLUGIN_ID, "#{PLUGIN_ID}_data")
-    FILE_MAIN = File.join(PATH_ROOT, PLUGIN_ID, "#{PLUGIN_ID}_main")
+    PATH_ROOT = File.dirname(file).freeze
+    PATH = File.join(PATH_ROOT, folder_name).freeze
+    PATH_ICONS = File.join(PATH, "icons").freeze
 
-    # Extension Initialization
-    EXT_DATA = SketchupExtension.new(PLUGIN_NAME, FILE_MAIN)
+    # Loads and parses extension.json
+    extension_json_file = File.join(PATH, "extension.json")
+    extension_json = File.read(extension_json_file)
+    EXTENSION = ::JSON.parse(extension_json, symbolize_names: true).freeze
 
-    # Some nice info
-    EXT_DATA.creator = PLUGIN_AUTHOR
-    EXT_DATA.version = PLUGIN_VERSION
-    EXT_DATA.copyright = "2022-#{Time.now.year}, #{PLUGIN_AUTHOR}"
-    EXT_DATA.description = PLUGIN_DESCRIPTION
+    PLUGIN = self
+    PLUGIN_NAME = EXTENSION[:name]
+    PLUGIN_VERSION = EXTENSION[:version]
+    PLUGIN_DESCRIPTION = EXTENSION[:description]
+    PLUGIN_AUTHOR = EXTENSION[:creator]
+    PLUGIN_COPYRIGHT = "#{PLUGIN_AUTHOR}, 2022-#{Time.now.year}"
 
-    # Register and load the extension on first install
-    Sketchup.register_extension(EXT_DATA, true)
+    # Prepares the extension for registration
+    loader = File.join(PATH, "main.rb")
+    @ext = SketchupExtension.new(EXTENSION[:name], loader)
+
+    # Extension info
+    @ext.description = PLUGIN_DESCRIPTION
+    @ext.version = PLUGIN_VERSION
+    @ext.copyright = PLUGIN_COPYRIGHT
+    @ext.creator = PLUGIN_AUTHOR
+
+    # Registers and loads the extension on first install
+    Sketchup.register_extension(@ext, true)
+
+    # Provides access to the extension instance
+    def self.extension
+      @ext
+    end
 
   end # module FaceUp
 end # module ASM_Extensions

@@ -1,0 +1,8 @@
+{
+  "name": "FaceUp",
+  "description": "Streamlined face creation from edges and efficient face extrusion.",
+  "creator": "Alejandro Soriano",
+  "license": "MIT License",
+  "version": "1.1.0",
+  "url": "https://github.com/alsomar/faceup"
+}
