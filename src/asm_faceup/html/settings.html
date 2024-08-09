@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en-US" class="h-100">
+<head>
+    <link href="../vendor/modus/modus.min.css" rel="stylesheet">
+    <link href="../vendor/modus/modus-layout.min.css" rel="stylesheet">
+    <link href="../libs/asav.css" rel="stylesheet">
+    <script src="../vendor/modus/jquery.js"></script>
+    <script src="../vendor/modus/bootstrap.bundle.min.js"></script>
+    <script src="../vendor/modus/modus-layout.min.js"></script>
+    <script src="../libs/asav.js"></script>
+</head>
+<body class="bg-panel-background">
+    <div class="asav-container">
+        <div class="modus-content-column">
+            <!-- Language -->
+            <div class="modus-content-row">
+                <label for="selectLanguage">Select language</label>
+                <select class="custom-select form-control" id="exampleFormSelect1">
+                    <option value="eng" selected>English</option>
+                    <option value="spa">Español</option>
+                    <option value="fre">Français</option>
+                    <option value="por">Português</option>
+                </select>
+            </div>
+            <!-- Context Menu -->
+            <div class="modus-content-row py-2">
+                <div class="custom-control my-2 custom-switch">
+                    <input type="checkbox" class="custom-control-input" id="switchContextMenu" checked>
+                    <label class="custom-control-label" for="switchContextMenu">Display Context Menu</label>
+                </div>
+            </div>
+            <!-- Apply/Cancel Buttons -->
+            <div class="modus-content-row text-right asav-br">
+                <button type="button" class="btn btn-outline-primary" v-on:click="cancelButton">Cancel</button>
+                <button type="button" class="btn btn-primary" id="applyButton" v-on:click="applyButton">Apply Changes</button>                
+            </div>
+        </div>
+    </div>
+</body>
+</html>

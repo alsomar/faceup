@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en-US" class="h-100">
+<head>
+    <link href="../vendor/modus/modus.min.css" rel="stylesheet">
+    <link href="../vendor/modus/modus-layout.min.css" rel="stylesheet">
+    <link href="../vendor/modus/modus-icons.css" rel="stylesheet">
+    <link href="../libs/asav.css" rel="stylesheet">
+    <script src="../vendor/modus/jquery.js"></script>
+    <script src="../vendor/modus/bootstrap.bundle.min.js"></script>
+    <script src="../vendor/modus/modus-layout.min.js"></script>
+    <script src="../vendor/vue.js"></script>
+    <script src="../libs/asav.js"></script>
+</head>
+<body class="position-relative">
+    <div class="position-relative p-0" style="height:600px;z-index:10">
+        <div class="modus-layout">
+            <!-- Header -->
+            <nav class="navbar nav modus-header">
+                <div class="btn-icon-only as-logo">
+                    <svg width="100%" height="100%" viewBox="0 0 32 32" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
+                        <g transform="matrix(0.0659399,0,0,0.0659399,-10.376,-10.376)">
+                            <path d="M509.853,384.176C491.27,379.153 476.432,372.108 476.432,358.547C476.432,344.721 487.739,333.415 511.611,333.415C529.465,333.415 539.014,339.698 544.286,345.981C547.303,349.744 549.309,353.773 550.569,358.547L580.724,358.547C578.453,348.998 574.69,340.444 569.169,332.918C559.869,320.103 542.263,307.023 511.611,307.023C471.409,307.023 446.294,332.404 446.294,359.79C446.294,398.5 487.49,406.789 518.408,414.829C536.991,419.852 551.829,426.384 551.829,440.21C551.829,455.279 540.771,466.602 512.871,466.602C493.027,466.602 482.218,458.81 476.184,451.018C472.669,446.493 470.149,441.221 468.906,435.187L438.751,435.187C440.757,445.995 444.785,455.793 450.803,464.082C460.866,478.654 479.698,492.977 512.871,492.977C556.852,492.977 581.984,467.845 581.984,438.95C581.984,400.754 540.771,393.228 509.853,384.176ZM257.538,445.415L258.217,442.713L258.234,442.713L280.25,357.138L284.609,339.698L284.726,339.698L291.837,312.062L263.241,312.062L218.016,487.954L246.911,487.954L248.635,481.058L248.37,481.058L257.538,445.415ZM317.434,312.062L310.405,339.698L355.381,339.698L375.224,415.078L291.257,415.078L284.228,442.713L382.27,442.713L394.322,487.954L424.477,487.954L377.993,312.062L317.434,312.062Z" style="fill-rule:nonzero;"/>
+                        </g>
+                    </svg>
+                </div>
+                <div class="navbar-nav">
+                    <div class="navbar-text">
+                        <span class="h2 font-weight-normal extSection">settings for</span> <span class="h2 font-weight-bold extName">FaceUp</span>
+                    </div>
+                </div>
+            </nav>
+            <!-- Body -->
+            <div class="modus-body sidebar-closed" data-modus-item="body" id="modusBody">
+                <!-- Sidebar -->
+                <nav class="nav flex-column modus-sidebar" id="modusSidebar">
+                    <ul>
+                        <li>
+                            <a href="javascript:void(0)" class="nav-link" onclick="loadSection('settings.html'); updateTitle('settings for')">
+                                <span class="left-nav-icon"><i class="modus-icons notranslate" aria-hidden="true">settings</i></span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="javascript:void(0)" class="nav-link" onclick="loadSection('about.html'); updateTitle('about')">
+                                <span class="left-nav-icon"><i class="modus-icons notranslate" aria-hidden="true">info</i></span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="javascript:void(0)" class="nav-link" onclick="loadSection('funding.html'); updateTitle('contribute to')">
+                                <span class="left-nav-icon"><i class="modus-icons notranslate" aria-hidden="true">people_group</i></span>
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
+                <!-- Content -->
+                <div class="modus-content-rows" id="modusContentRows">
+                    <iframe src="settings.html" class="modus-content asav-bg" id="modusContentFrame" style="width: 100%; height: 100%; border: none;">
+                    </iframe>
+                </div>
+            </div>
+            <!-- Footer -->
+            <div class="modus-footer">
+                <p class="form-labels text-right text-gray-4 mr-1 extCopyright">&copy; Alejandro Soriano, 2024</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

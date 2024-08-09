@@ -2,56 +2,50 @@
 module ASM_Extensions
   module FaceUp
 
-    class SummonFacesTool
-      def initialize
-        self.class.summonfaces
+    def self.summonfaces
+      model = Sketchup.active_model
+      selection = model.selection
+      presel_faces = selection.grep(Sketchup::Face)
+      presel_edges = selection.grep(Sketchup::Edge)
+
+      unless presel_edges.empty?
+        model.start_operation("FaceUp: Summon Faces", true)
+        new_faces = create_faces(presel_edges)
+        orient_faces(new_faces)
+        update_selection(selection, presel_faces, new_faces)
+        model.commit_operation
+      else
+        UI.messagebox("Please select some edges.")
       end
+    end
 
-      def self.summonfaces
-        model = Sketchup.active_model
-        selection = model.selection
-        presel_faces = selection.grep(Sketchup::Face)
-        presel_edges = selection.grep(Sketchup::Edge)
-
-        unless presel_edges.empty?
-          model.start_operation("FaceUp: Summon Faces", true)
-          new_faces = create_faces(presel_edges)
-          orient_faces(new_faces)
-          update_selection(selection, presel_faces, new_faces)
-          model.commit_operation
-        else
-          UI.messagebox("Please select some edges.")
-        end
+    def self.create_faces(presel_edges)
+      new_faces = []
+      presel_edges.each do |edge|
+        edge.find_faces
+        edge.faces.each { |face| new_faces << face unless new_faces.include?(face) }
       end
+      new_faces.uniq
+    end
 
-      def self.create_faces(presel_edges)
-        new_faces = []
-        presel_edges.each do |edge|
-          edge.find_faces
-          edge.faces.each { |face| new_faces << face unless new_faces.include?(face) }
-        end
-        new_faces.uniq
+    def self.orient_faces(new_faces)
+      camera = Sketchup.active_model.active_view.camera
+      view_vector = camera.eye - camera.target
+      view_orientation = view_vector.normalize
+
+      new_faces.each do |face|
+        angle = face.normal.angle_between(view_orientation)
+        face.reverse! if angle.abs > Math::PI / 2
       end
+    end
 
-      def self.orient_faces(new_faces)
-        camera = Sketchup.active_model.active_view.camera
-        view_vector = camera.eye - camera.target
-        view_orientation = view_vector.normalize
-
-        new_faces.each do |face|
-          angle = face.normal.angle_between(view_orientation)
-          face.reverse! if angle.abs > Math::PI / 2
-        end
-      end
-
-      def self.update_selection(selection, presel_faces, new_faces)
-        selection.clear
-        final_faces = presel_faces + new_faces
-        selection.add(final_faces)
-        final_edges = final_faces.map(&:edges).flatten.uniq
-        selection.add(final_edges)
-      end
-    end # class SummonFacesTool
+    def self.update_selection(selection, presel_faces, new_faces)
+      selection.clear
+      final_faces = presel_faces + new_faces
+      selection.add(final_faces)
+      final_edges = final_faces.map(&:edges).flatten.uniq
+      selection.add(final_edges)
+    end
 
     class ExtruderTool
 
@@ -321,6 +315,44 @@ module ASM_Extensions
       end
 
     end # class TurboTool
+
+    def self.settings_dialog
+      if @dialog && @dialog.visible?
+        @dialog.bring_to_front
+        return
+      end
+
+      html_file = File.join(PATH_HTML, 'index.html')
+      html_title = "#{PLUGIN_NAME} #{PLUGIN_VERSION}"
+
+      width = 15 + 400 + 15
+      height = 15 + 600 + 15
+
+      if Sketchup.version.to_f < 21.1
+        width += 20
+        height += 40
+      end
+
+      options = {
+        dialog_title: html_title,
+        preferences_key: "asm_extensions.htmldialog.faceup",
+        style: UI::HtmlDialog::STYLE_DIALOG,
+        resizable: true,
+        width: width,
+        height: height,
+        use_content_size: true
+      }
+
+      @dialog ||= UI::HtmlDialog.new(options)
+      @dialog.set_file(html_file)
+
+      @dialog.add_action_callback("userSettings") do |action_context, context_menu, user_language|
+        userSettings(context_menu, user_language)
+      end
+
+      @dialog.center
+      @dialog.show
+    end
 
   end # module FaceUp
 end # module ASM_Extensions

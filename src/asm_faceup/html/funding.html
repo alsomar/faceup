@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en-US" class="h-100">
+<head>
+    <link href="../vendor/modus/modus.min.css" rel="stylesheet">
+    <link href="../vendor/modus/modus-layout.min.css" rel="stylesheet">
+    <link href="../libs/asav.css" rel="stylesheet">
+    <script src="../vendor/modus/jquery.js"></script>
+    <script src="../vendor/modus/bootstrap.bundle.min.js"></script>
+    <script src="../vendor/modus/modus-layout.min.js"></script>
+    <script src="../libs/asav.js"></script>
+</head>
+<body class="bg-panel-background">
+    <div class="asav-container">
+        <div class="modus-content-column">
+            <div class="modus-content-row">
+                <h2>Acknowledgements</h2>
+                <p class="text-secondary">Lead Text / Open Sans Regular</p>
+            </div>
+            <!-- Release List -->
+            <div class="modus-content-row py-3">
+                <select class="custom-select form-control" id="formSelect" onchange="thanksContent()">
+                    <option value="0101" selected>Test Extension 1.0.1 - Released on June 7th, 2024</option>
+                    <option value="0100">Test Extension 1.0.0 - Released on April 12th, 2024</option>
+                </select>
+            </div>
+            <div class="modus-content-row py-3">
+                This release could not have been possible without the help of these <a href="https://patreon.com/alejandrosoriano" class="font-weight-bolder" target="_blank">Patreon</a> supporters. Thank you!
+            </div>
+            <!-- Patreons -->
+            <div class="modus-content-row">
+                <div id="content_0101" style="display: block;">
+                    <p>Contenido de Test Extension 1.0.1</p></div>
+                <div id="content_0100" style="display: none;">
+                    <p>Contenido de Test Extension 1.0.0</p></div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,21 @@
+.asav-bg {
+    background-color:rgb(246, 246, 246);
+}
+
+.asav-br {
+    position: absolute;
+    bottom: 1rem;
+    right: 1rem;
+}
+
+.asav-container{
+    padding: 1rem;
+    overflow-y: auto;
+}
+
+.as-logo{
+    height: 3rem;
+    width: 3rem;
+    padding: 0;
+}
+

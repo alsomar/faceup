@@ -1,4 +1,4 @@
-require 'asm_faceup/data.rb'
+Sketchup.require 'asm_faceup/data'
 
 module ASM_Extensions
   module FaceUp
@@ -42,6 +42,14 @@ module ASM_Extensions
       cmd_turbo = cmd
       @commands[:turbo] = cmd
 
+      cmd = UI::Command.new('FaceUp Settings') {self.settings_tool}
+      cmd.small_icon = self.icon("settings_16")
+      cmd.large_icon = self.icon("settings_24")
+      cmd.status_bar_text = 'Settings'
+      cmd.tooltip = 'FaceUp Settings'
+      cmd_settings = cmd
+      @commands[:settings] = cmd
+
       # Menu
       menu = UI.menu('Extensions').add_submenu(PLUGIN_NAME)
       menu.add_item(cmd_summonfaces)
@@ -65,13 +73,20 @@ module ASM_Extensions
       toolbar.add_item(cmd_extruder)
       toolbar.add_separator
       toolbar.add_item(cmd_turbo)
+      toolbar.add_separator
+      toolbar.add_item(cmd_settings)
 
+      if toolbar.get_last_state == TB_VISIBLE
+        toolbar.restore
+      else
+        toolbar.show
+      end
     end
 
     ### MAIN SCRIPT ### ----------------------------------------------------------
 
     def self.summonfaces_tool
-      ASM_Extensions::FaceUp::SummonFacesTool.summonfaces
+      ASM_Extensions::FaceUp.summonfaces
     end
 
     def self.extruder_tool
@@ -80,6 +95,10 @@ module ASM_Extensions
 
     def self.turbo_tool
       ASM_Extensions::FaceUp::TurboTool.turbo
+    end
+
+    def self.settings_tool
+      ASM_Extensions::FaceUp.settings_dialog
     end
 
   end # module FaceUp
