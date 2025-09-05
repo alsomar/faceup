@@ -86,7 +86,7 @@ module ASM_Extensions
     ### MAIN SCRIPT ### ----------------------------------------------------------
 
     def self.summonfaces_tool
-      ASM_Extensions::FaceUp.summonfaces
+      ASM_Extensions::FaceUp.summon_faces
     end
 
     def self.extruder_tool

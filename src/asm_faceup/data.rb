@@ -2,20 +2,42 @@
 module ASM_Extensions
   module FaceUp
 
-    def self.summonfaces
+    MESSAGES = {
+      no_selection:  "There's nothing selected.",
+      no_edges:      "Please select some edges.",
+      process_done:  "✔ Process done!",
+      process_fail:  "✘ Process failed!"
+    }.freeze
+
+    def self.summon_faces
       model = Sketchup.active_model
       selection = model.selection
+
       presel_faces = selection.grep(Sketchup::Face)
       presel_edges = selection.grep(Sketchup::Edge)
 
-      unless presel_edges.empty?
-        model.start_operation("FaceUp: Summon Faces", true)
+      # Selection checks
+      if presel_edges.empty?
+        UI.messagebox(MESSAGES[:no_edges])
+        return
+      end
+
+      # Operation Start
+      op_name = "Summon Faces"
+      model.start_operation(op_name, true)
+
+      begin
         new_faces = create_faces(presel_edges)
         orient_faces(new_faces)
         update_selection(selection, presel_faces, new_faces)
         model.commit_operation
-      else
-        UI.messagebox("Please select some edges.")
+        puts "#{op_name}: #{MESSAGES[:process_done]}"
+      rescue => e
+        model.abort_operation
+        UI.messagebox("Error: #{e.message}")
+        puts "#{op_name}: #{MESSAGES[:process_fail]} #{e.message}"
+      ensure
+        model.active_view.refresh
       end
     end
 
@@ -295,10 +317,10 @@ module ASM_Extensions
 
     end # class ExtruderTool
 
-    class TurboTool
+    class TurboTool # > ExtruderTool
 
       def self.turbo_step1
-        ASM_Extensions::FaceUp::SummonFacesTool.summonfaces
+        ASM_Extensions::FaceUp.summonfaces
       end
 
       def self.turbo_step2
