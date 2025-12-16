@@ -1,21 +1,93 @@
-.asav-bg {
-    background-color:rgb(246, 246, 246);
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+button:disabled {
+  cursor: not-allowed !important;
+}
+
+.custom-control-input:disabled + .custom-control-label::before,
+.custom-control-input:disabled + .custom-control-label::after {
+  cursor: not-allowed !important;
+}
+
+.accordion .card .card-header {
+    padding-top: 0.66rem;
+    padding-bottom: 0.4rem;
+}
+
+.card-custom {
+  padding-left: .4rem;
+  padding-top: .4rem;
+  padding-bottom: 1rem;
+}
+
+.message {
+  margin-bottom: 0;
+}
+
+.modus-sidebar {
+  flex: 0 0 200px;
+}
+
+.modus-content-rows {
+  flex: 1;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.asav-root {
+  height: 100%;
+  padding: 0;
+  position: relative;
+}
+
+.asav-content{
+  padding: 1rem 1.2rem 1rem 1rem;
+  overflow-y: auto;
+  background-color:rgb(246, 246, 246);
+}
+
+.asav-hr {
+  border: none;
+  border-top: 1px solid #ccc;
+  margin: 0;
+  padding: 0;
 }
 
 .asav-br {
-    position: absolute;
-    bottom: 1rem;
-    right: 1rem;
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
 }
 
-.asav-container{
-    padding: 1rem;
-    overflow-y: auto;
+.asav-br button {
+  min-width: 18ch;
 }
 
-.as-logo{
-    height: 3rem;
-    width: 3rem;
-    padding: 0;
+/* Transición suave */
+.card-header[role="button"] h6 {
+  transition: color 0.15s ease, 
+              font-weight 0.15s ease,
+              font-size 0.15s ease;
 }
 
+/* Cerrado (no activo) */
+.card-header[role="button"].collapsed {
+  padding-top: 0.6rem !important;
+  padding-bottom: 0.6rem !important;
+}
+
+.card-header[role="button"].collapsed h6 {
+  color: inherit;
+  font-weight: 400;
+  font-size: 0.9rem;
+}
+
+/* Abierto (activo) */
+.card-header[role="button"]:not(.collapsed) h6 {
+  color: #005f9e;
+  font-weight: 600;
+}

@@ -1,0 +1,13 @@
+{
+  "name": "FaceUp",
+  "version": "1.2.0",
+  "description": "Streamlined face creation from edges and efficient face extrusion.",
+  "creator": "Alejandro Soriano",
+  "copyright": "© Alejandro Soriano, 2023-2024",
+  "license": "MIT License",
+  "release": "December 1st, 2023",
+  "update": "June 7th, 2024",
+  "url_ew":"https://extensions.sketchup.com/",
+  "url_su":"https://sketchucation.com",
+  "url_gu": "https://github.com/alsomar/faceup"
+}

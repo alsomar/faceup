@@ -1,40 +1,294 @@
 <!DOCTYPE html>
 <html lang="en-US" class="h-100">
 <head>
-    <link href="../vendor/modus/modus.min.css" rel="stylesheet">
-    <link href="../vendor/modus/modus-layout.min.css" rel="stylesheet">
-    <link href="../libs/asav.css" rel="stylesheet">
-    <script src="../vendor/modus/jquery.js"></script>
-    <script src="../vendor/modus/bootstrap.bundle.min.js"></script>
-    <script src="../vendor/modus/modus-layout.min.js"></script>
-    <script src="../libs/asav.js"></script>
+  <link href="../vendor/modus/modus.min.css" rel="stylesheet">
+  <link href="../vendor/modus/modus-layout.min.css" rel="stylesheet">
+  <link href="../vendor/modus/modus-icons.css" rel="stylesheet">
+  <link href="../libs/asav.css" rel="stylesheet">
+  <script src="../vendor/modus/jquery.js"></script>
+  <script src="../vendor/modus/bootstrap.bundle.min.js"></script>
+  <script src="../vendor/vue.min.js"></script>
+  <!-- <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script> -->
+  <script src="../libs/asav.js"></script>
 </head>
-<body class="bg-panel-background">
-    <div class="asav-container">
-        <div class="modus-content-column">
-            <!-- Language -->
-            <div class="modus-content-row">
-                <label for="selectLanguage">Select language</label>
-                <select class="custom-select form-control" id="exampleFormSelect1">
-                    <option value="eng" selected>English</option>
-                    <option value="spa">Español</option>
-                    <option value="fre">Français</option>
-                    <option value="por">Português</option>
-                </select>
+<body>
+  <div class="asav-root">
+    <div id="app" class="modus-layout">
+      <hr class="asav-hr">
+      <!-- Body -->
+      <div class="modus-body sidebar-closed d-flex" data-modus-item="body" id="Z">
+        <!-- Sidebar -->
+        <nav class="nav flex-column modus-sidebar pt-2">
+          <ul>
+          <li>
+            <a href="#" class="nav-link" @click.prevent="section = 'settings'" id="settings-nav">
+              <span class="left-nav-icon" id="settings-icon">
+                <i class="modus-icons">settings</i>
+              </span>
+              Settings
+            </a>
+          </li>
+          <li>
+            <a href="#" class="nav-link" @click.prevent="section = 'about'">
+            <span class="left-nav-icon"><i class="modus-icons">info</i></span>
+            About
+            </a>
+          </li>
+          <li>
+            <a href="#" class="nav-link" @click.prevent="section = 'thanks'">
+            <span class="left-nav-icon"><i class="modus-icons">people_group</i></span>
+            Thanks
+            </a>
+          </li>
+          </ul>
+        </nav>
+        <!-- Content -->
+        <div class="modus-content-rows asav-content">
+          <!-- Settings -->
+          <div v-show="section === 'settings'">
+            <!-- Title -->
+            <div class="modus-content-row pb-2">
+                <span class="h2 font-weight-bold">{{ extName }}</span>
+                <span class="h2 font-weight-normal">&#32;&middot;&#32;</span>
+                <span class="h2 font-weight-normal">Settings</span>
             </div>
-            <!-- Context Menu -->
-            <div class="modus-content-row py-2">
-                <div class="custom-control my-2 custom-switch">
-                    <input type="checkbox" class="custom-control-input" id="switchContextMenu" checked>
-                    <label class="custom-control-label" for="switchContextMenu">Display Context Menu</label>
+            <!-- Accordion -->
+            <div class="accordion" id="accordionSettings">
+              <!-- Second Tab -->
+              <div class="card">
+                <!-- Second Tab: Title -->
+                <div class="card-header collapsed" id="accordionTab2" role="button"
+                  data-toggle="collapse" data-target="#collapseTab2"
+                  aria-expanded="false" aria-controls="collapseTab2">
+                  <h6 class="mb-0" id="collapsible-group-item-2">
+                    Second Tab</h6>
                 </div>
+                <!-- Second Tab: Settings -->
+                <div class="collapse" id="collapseTab2"
+                  aria-labelledby="accordionTab2" data-parent="#accordionSettings">
+                  <div class="card-body card-custom">
+                      <!-- Test Button 1 -->
+                      <div class="custom-control custom-switch">
+                          <input type="checkbox" class="custom-control-input" v-model="settingsTest1" id="settingsTest1">
+                          <label class="custom-control-label" for="settingsTest1">Test Button 1</label>
+                      </div>
+                      <!-- Test Button 2 -->
+                      <div class="custom-control custom-switch">
+                          <input type="checkbox" class="custom-control-input" v-model="settingsTest2" id="settingsTest2">
+                          <label class="custom-control-label" for="settingsTest2">
+                            Test Button 2</label>
+                      </div>
+                      <!-- Test Button 3 -->
+                      <div class="custom-control custom-switch">
+                          <input type="checkbox" class="custom-control-input" id="settingsTest3"
+                            v-model="settingsTest3" :disabled="!settingsTest2">
+                          <label class="custom-control-label" :class="!settingsTest2 ? 'text-muted' : ''" for="settingsTest3">
+                            Test Button 3</label>
+                      </div>
+                  </div>
+                </div>
+              </div>
+              <!-- General Options -->
+              <div class="card">
+                <!-- General Options: Title -->
+                <div class="card-header" id="accordionTab1" role="button"
+                  data-toggle="collapse" data-target="#collapseTab1"
+                  aria-expanded="true" aria-controls="collapseTab1">
+                  <h6 class="mb-0" id="collapsible-group-item-1">
+                    General Options</h6>
+                </div>
+                <!-- General Options: Settings -->
+                <div class="collapse show" id="collapseTab1"
+                  aria-labelledby="accordionTab1" data-parent="#accordionSettings">
+                  <div class="card-body card-custom">
+                      <!-- Language -->
+                      <div class="mb-2">
+                        <label for="settingsLanguage">Language selection</label>
+                        <select class="custom-select form-control" v-model="settingsLanguage" id="settingsLanguage">
+                        <option value="eng">English</option>
+                        <option value="spa">Espa&ntilde;ol</option>
+                        </select>
+                        <!-- Language info -->
+                        <div class="message message-primary">
+                          <i class="modus-icons notranslate" aria-hidden="true">info</i>You may need to restart SketchUp to update the language settings.
+                        </div>
+                      </div>
+                      <!-- Context Menu -->
+                      <div class="custom-control custom-switch">
+                          <input type="checkbox" class="custom-control-input" v-model="settingsContextMenu" id="settingsContextMenu">
+                          <label class="custom-control-label" for="settingsContextMenu">Display context menu</label>
+                      </div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <!-- Apply/Cancel Buttons -->
+            <!-- Save Settings Button -->
             <div class="modus-content-row text-right asav-br">
-                <button type="button" class="btn btn-outline-primary" v-on:click="cancelButton">Cancel</button>
-                <button type="button" class="btn btn-primary" id="applyButton" v-on:click="applyButton">Apply Changes</button>                
-            </div>
+              <button
+                type="button"
+                class="btn"
+                :class="hasChanges ? 'btn-primary' : 'btn-outline-dark'"
+                @click="acceptButton"
+                :disabled="!hasChanges"
+              >
+                {{ hasChanges ? 'Save Settings' : 'Settings Saved' }}
+              </button>
+              </div>
+          </div>
+          <!-- About -->
+          <div v-show="section === 'about'">
+              <!-- Title -->
+              <div class="modus-content-row pb-3">
+                  <span class="h2 font-weight-bold">{{ extName }}</span>
+                  <span class="h2 font-weight-normal">&#32;&middot;&#32;</span>
+                  <span class="h2 font-weight-normal">About</span>
+              </div>
+              <!-- Extension Info -->
+              <div class="modus-content-row">
+                  <p class="body-text">
+                      Version <span>{{ extVersion }}</span> (<span>{{ extUpdate }}</span>)</p>
+                  <p class="card-text text-secondary font-italic">
+                      <span>{{ extDescription }}</span></p>
+                  <hr>
+                  <p class="body-text">
+                      Designed and developed by <a href="https://alejandrosoriano.xyz" target="_blank">Alejandro Soriano</a>.</p>
+                  <p class="body-text">
+                      This extension uses <a href="https://modus-bootstrap.trimble.com/" target="_blank">Trimble Modus Bootstrap</a>.</p>
+              </div>
+              <!-- Warning box -->
+              <div class="modus-content-column border border-warning bg-white my-4">
+                  <div class="form-row m-3">
+                      <div class="col-auto">
+                          <i class="modus-icons" aria-hidden="true">alert_outlined</i>
+                      </div>
+                      <div class="col">
+                          <p class="card-text"><span>{{ extName }}</span> is <span class="font-weight-bold">free</span>!</p>
+                      </div>
+                  </div>
+                  <div class="form-row mx-3">
+                      <p class="body-text">Please beware of scammers and trust only <a v-bind:href="extEW" target="_blank" rel="noopener">Extension Warehouse</a> and <a v-bind:href="extSU" target="_blank" rel="noopener">SketchUcation</a> as your download sources for <span>{{ extName }}</span>.
+                  </div>
+              </div>
+          </div>
+          <!-- Thanks -->
+          <div v-show="section === 'thanks'">
+              <!-- Title -->
+              <div class="modus-content-row pb-3">
+                  <span class="h2 font-weight-bold">{{ extName }}</span>
+                  <span class="h2 font-weight-normal">&#32;&middot;&#32;</span>
+                  <span class="h2 font-weight-normal">Thanks</span>
+              </div>
+              <!-- Intro -->
+              <div class="modus-content-row">
+                  <p class="body-text">Many thanks to the developer communities at the <a href="https://forums.sketchup.com" class="font-weight-bolder" target="_blank">SketchUp Forums</a> and <a href="https://community.sketchucation.com" class="font-weight-bolder" target="_blank">SketchUcation</a> for their support, insights, and shared knowledge that help make extensions like <span>{{ extName }}</span> possible.</p>
+                  <p class="body-text">Your support through <a href="https://patreon.com/alejandrosoriano" class="font-weight-bolder" target="_blank">Patreon</a> is invaluable. As a solo developer, it helps me continue creating and improving extensions like <span>{{ extName }}</span>.</p>
+                  <p class="body-text">This release could not have been possible without the help of these <a href="https://patreon.com/alejandrosoriano" class="font-weight-bolder" target="_blank">Patreon</a> supporters.</p>
+                  <p class="body-text font-weight-bolder">Thank you for your generosity!</p>
+              </div>
+              <!-- Release List -->
+              <div class="modus-content-row">
+                  <select class="custom-select form-control" id="formSelect" onchange="thanksContent()">
+                      <option value="0101" selected>Test Extension 1.0.1 - Released on June 7th, 2024</option>
+                      <option value="0100">Test Extension 1.0.0 - Released on April 12th, 2024</option>
+                  </select>
+              </div>
+              <!-- Patreons -->
+              <div class="modus-content-row pt-3">
+                  <div id="content_0101" style="display: block;">
+                      <p>Contenido de Test Extension 1.0.1</p>
+                      <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla varius tincidunt nunc, vel faucibus sapien finibus vitae. Integer vehicula pulvinar magna, eget accumsan odio condimentum vel. Proin ac sagittis risus. Mauris bibendum, lectus at fermentum luctus, libero leo aliquam mauris, sed porttitor lacus orci ut nibh. Sed at leo dui. Vivamus eget magna eget nunc tristique ultrices vel a augue. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Etiam non magna ligula. Vestibulum scelerisque sapien nec tortor pretium tincidunt. Quisque rutrum sapien nec felis accumsan fringilla. Integer gravida mauris eget orci vehicula pretium.
+
+Aliquam erat volutpat. Sed sodales egestas lorem, eget tincidunt metus faucibus sit amet. Duis nec pretium nunc, in posuere nunc. Integer pulvinar risus nec nisi tincidunt imperdiet. Aenean ultrices leo sed leo eleifend dapibus. Sed tristique interdum lacus, id volutpat lacus pulvinar ut. Suspendisse sit amet magna ultricies, hendrerit turpis nec, dictum est. Donec luctus justo ac urna aliquet, vitae pulvinar libero ornare. Suspendisse nec vestibulum est, eget sodales nunc. Aliquam condimentum nulla nec nibh sagittis, vitae dapibus nisi tincidunt.</p>
+                  </div>
+                  <div id="content_0100" style="display: none;">
+                      <p>Contenido de Test Extension 1.0.0</p>
+                  </div>
+              </div>
+              <p class="body-text">Sincerely,<br>Alejandro Soriano</p>
+          </div>
         </div>
+      </div>
+      <!-- Footer -->
+      <div class="modus-footer">
+        <p class="form-labels text-gray-4 text-right mr-1 my-0">
+          <span>{{ extCopyright}}</span>
+        </p>
+      </div>
     </div>
+  </div>
+  <script>
+    window.sketchup = window.sketchup || {};
+  </script>
+  <script>
+    window.app = new Vue({
+      el: '#app',
+      data() {
+        return {
+          // Initial section
+          section: 'settings',
+
+          // Metadata
+          extName: "",
+          extVersion: "",
+          extDescription: "",
+          extCopyright: "",
+          extRelease: "",
+          extUpdate: "",
+          extEW: "",
+          extSU: "",
+          extGH: "",
+
+          // General options
+          settingsTest1: true,
+          settingsTest2: false,
+          settingsTest3: false,
+          settingsLanguage: 'eng',
+          settingsContextMenu: false,
+
+          // Debug
+          debug_mode: false,
+
+          // Initial state snapshot
+          initialSettings: ''    
+        };
+      },
+      mounted() {
+        if (window.sketchup && window.sketchup.ready) {
+          window.sketchup.ready();
+        }
+        this.initialSettings = JSON.stringify(this.currentSettings());
+      },
+      watch:{
+        settingsTest2(enabled) {
+          if (!enabled) {
+            this.settingsTest3 = false;
+          }
+        }
+      },
+      methods: {
+        currentSettings() {
+          return {
+            settings_test1: this.settingsTest1,
+            settings_test2: this.settingsTest2,
+            settings_test3: this.settingsTest3,
+            language: this.settingsLanguage,
+            context_menu: this.settingsContextMenu,
+            debug_mode: this.debugMode,
+          };
+        },
+        acceptButton() {
+          const settings = this.currentSettings();
+          sketchup.user_settings(JSON.stringify(settings));
+          // Update baseline after saving
+          this.initialSettings = JSON.stringify(settings);
+        }
+      },
+      computed: {
+        hasChanges() {
+          return JSON.stringify(this.currentSettings()) !== this.initialSettings;
+        }
+      }
+    });
+  </script>
 </body>
 </html>

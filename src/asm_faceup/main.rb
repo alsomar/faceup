@@ -1,3 +1,5 @@
+Sketchup.require 'asm_faceup/core'
+Sketchup.require 'asm_faceup/settings'
 Sketchup.require 'asm_faceup/data'
 
 module ASM_Extensions
@@ -58,14 +60,15 @@ module ASM_Extensions
       menu.add_item(cmd_turbo)
 
       # Context menu
-      UI.add_context_menu_handler { |context_menu|
+      UI.add_context_menu_handler do |context_menu|
+        next unless CONFIG[:context_menu]
         menu = context_menu.add_submenu(PLUGIN_NAME)
         menu.add_separator
         menu.add_item(cmd_summonfaces)
         menu.add_item(cmd_extruder)
         menu.add_separator
         menu.add_item(cmd_turbo)
-      }
+      end
 
       # Toolbar
       toolbar = UI::Toolbar.new (PLUGIN_NAME)
@@ -81,27 +84,27 @@ module ASM_Extensions
       else
         toolbar.show
       end
-    end
 
-    ### MAIN SCRIPT ### ----------------------------------------------------------
+      ### MAIN SCRIPT ### ----------------------------------------------------------
 
-    def self.summonfaces_tool
-      ASM_Extensions::FaceUp.summon_faces
-    end
+      def self.summonfaces_tool
+        ASM_Extensions::FaceUp.summon_faces
+      end
 
-    def self.extruder_tool
-      Sketchup.active_model.select_tool(ExtruderTool.new)
-    end
+      def self.extruder_tool
+        Sketchup.active_model.select_tool(ExtruderTool.new)
+      end
 
-    def self.turbo_tool
-      ASM_Extensions::FaceUp::TurboTool.turbo
-    end
+      def self.turbo_tool
+        ASM_Extensions::FaceUp::TurboTool.turbo
+      end
 
-    def self.settings_tool
-      ASM_Extensions::FaceUp.settings_dialog
+      def self.settings_tool
+        ASM_Extensions::FaceUp.settings_dialog
+      end
+
+      file_loaded(__FILE__)
     end
 
   end # module FaceUp
 end # module ASM_Extensions
-
-file_loaded(__FILE__)
