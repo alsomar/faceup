@@ -44,7 +44,7 @@ module ASM_Extensions
         model.active_view.refresh
         if Debug.enabled
           elapsed = Time.now - start_time
-          Debug.log(method_id, "Process DONE! / Elapsed #{format('%.3f', elapsed)} sec.")
+          Debug.log(method_id, "Process DONE! Elapsed #{format('%.3f', elapsed)} sec.")
         end
       end
 

@@ -27,6 +27,7 @@ module ASM_Extensions
     end
 
     module Debug
+
       def self.enabled
         return false unless defined?(CONFIG) && CONFIG.is_a?(Hash)
         CONFIG[:debug_mode] == true
@@ -40,7 +41,7 @@ module ASM_Extensions
       def self.separator
         puts "" if enabled
       end
-
+      
     end
 
   end
