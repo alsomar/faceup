@@ -17,7 +17,7 @@ module ASM_Extensions
         return
       end
 
-      puts "" if Debug.enabled
+      Debug.separator
       Debug.log(method_id, "Process START")
       # Debug.log(method_id, "Selection filter: #{targets.size}/#{selection.size}")
 
@@ -184,14 +184,6 @@ module ASM_Extensions
 
       private
 
-      def debug_mode
-        ASM_Extensions::FaceUp::Debug.enabled
-      end
-
-      def debug_log(method_id, msg)
-        ASM_Extensions::FaceUp::Debug.log(method_id, msg)
-      end
-
       def draw_preview(face, view)
         return unless face && @extrusion_distance
 
@@ -274,17 +266,17 @@ module ASM_Extensions
 
         method_id  = __method__
 
-        puts "" if debug_mode
-        debug_log(method_id, "Process START (#{Time.now.strftime("%H:%M:%S")})")
-        # debug_log(method_id, "Selection filter: #{targets.size}/#{selection.size}")
+        Debug.separator
+        Debug.log(method_id, "Process START (#{Time.now.strftime("%H:%M:%S")})")
+        # Debug.log(method_id, "Selection filter: #{targets.size}/#{selection.size}")
 
         # Operation start
         op_name = "Extruder"
-        start_time = Time.now if debug_mode
+        start_time = Time.now if Debug.enabled
         model.start_operation(op_name, true)
 
         begin
-          debug_log(method_id, "Wrapper ENTER")
+          Debug.log(method_id, "Wrapper ENTER")
 
           groups = face2group(@selected_faces)
           xtrd_groups(groups, @extrusion_distance)
@@ -293,17 +285,17 @@ module ASM_Extensions
           model.set_attribute('ASM_Extensions_FaceUp', 'last_extrusion_distance', @extrusion_distance)
 
           model.commit_operation
-          debug_log(method_id, "Wrapper LEAVE")
+          Debug.log(method_id, "Wrapper LEAVE")
         rescue => e
           model.abort_operation
           UI.messagebox("Error: #{e.message}")
-          debug_log(method_id, "ERROR #{e.class}: #{e.message}")
-          debug_log(method_id, e.backtrace.join("\n"))
+          Debug.log(method_id, "ERROR #{e.class}: #{e.message}")
+          Debug.log(method_id, e.backtrace.join("\n"))
         ensure
           model.active_view.refresh
-          if debug_mode
+          if Debug.enabled
             elapsed = Time.now - start_time
-            debug_log(method_id, "Process DONE! (#{Time.now.strftime("%H:%M:%S")}) / Elapsed #{format('%.3f', elapsed)} sec.")
+            Debug.log(method_id, "Process DONE! (#{Time.now.strftime("%H:%M:%S")}) / Elapsed #{format('%.3f', elapsed)} sec.")
           end
         end
 

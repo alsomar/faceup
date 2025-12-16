@@ -7,8 +7,8 @@ module ASM_Extensions
     unless file_loaded?(__FILE__)
       extension_id  = File.basename(__FILE__, '.*')
       extension_dir = File.join(__dir__, extension_id)
-      loader      = File.join(plugin_dir, 'main')
-      info_file   = File.join(plugin_dir, 'info.json')
+      loader      = File.join(extension_dir, 'main')
+      info_file   = File.join(extension_dir, 'info.json')
       info_hash   = JSON.parse(File.read(info_file), symbolize_names: true)
 
       EXTENSION   = info_hash.freeze

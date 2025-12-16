@@ -36,6 +36,11 @@ module ASM_Extensions
         return unless debug_mode
         puts "[#{Time.now.strftime('%H:%M:%S.%L')}][#{PLUGIN_NAME}][#{method_id}] #{msg}"
       end
+
+      def self.separator
+        puts "" if enabled
+      end
+
     end
 
   end
