@@ -33,7 +33,7 @@ module ASM_Extensions
       end
 
       def self.log(method_id, msg)
-        return unless debug_mode
+        return unless enabled
         puts "[#{Time.now.strftime('%H:%M:%S.%L')}][#{PLUGIN_NAME}][#{method_id}] #{msg}"
       end
 
