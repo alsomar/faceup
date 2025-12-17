@@ -267,7 +267,7 @@ module ASM_Extensions
         method_id  = __method__
 
         Debug.separator
-        Debug.log(method_id, "Process START (#{Time.now.strftime("%H:%M:%S")})")
+        Debug.log(method_id, "Process START")
         # Debug.log(method_id, "Selection filter: #{targets.size}/#{selection.size}")
 
         # Operation start
@@ -295,7 +295,7 @@ module ASM_Extensions
           model.active_view.refresh
           if Debug.enabled
             elapsed = Time.now - start_time
-            Debug.log(method_id, "Process DONE! (#{Time.now.strftime("%H:%M:%S")}) / Elapsed #{format('%.3f', elapsed)} sec.")
+            Debug.log(method_id, "Process DONE! Elapsed #{format('%.3f', elapsed)} sec.")
           end
         end
 
