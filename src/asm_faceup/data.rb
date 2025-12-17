@@ -17,14 +17,14 @@ module ASM_Extensions
         return
       end
 
-      Debug.separator
-      Debug.log(method_id, "Process START")
-      # Debug.log(method_id, "Selection filter: #{targets.size}/#{selection.size}")
-
       # Operation Start
       op_name = "Summon Faces"
       start_time = Time.now if Debug.enabled
       model.start_operation(op_name, true)
+
+      Debug.separator
+      Debug.log(method_id, "Process START")
+      # Debug.log(method_id, "Selection filter: #{targets.size}/#{selection.size}")
 
       begin
         Debug.log(method_id, "Wrapper ENTER")
@@ -266,14 +266,14 @@ module ASM_Extensions
 
         method_id  = __method__
 
-        Debug.separator
-        Debug.log(method_id, "Process START")
-        # Debug.log(method_id, "Selection filter: #{targets.size}/#{selection.size}")
-
         # Operation start
         op_name = "Extruder"
         start_time = Time.now if Debug.enabled
         model.start_operation(op_name, true)
+
+        Debug.separator
+        Debug.log(method_id, "Process START")
+        # Debug.log(method_id, "Selection filter: #{targets.size}/#{selection.size}")
 
         begin
           Debug.log(method_id, "Wrapper ENTER")
