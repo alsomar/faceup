@@ -1,29 +1,28 @@
-require 'json'
-require 'sketchup'
+require "json"
+require "sketchup"
 
 module ASM_Extensions
   module FaceUp
 
     unless file_loaded?(__FILE__)
-      extension_id  = File.basename(__FILE__, '.*')
-      extension_dir = File.join(__dir__, extension_id)
-      loader      = File.join(extension_dir, 'main')
-      info_file   = File.join(extension_dir, 'info.json')
-      info_hash   = JSON.parse(File.read(info_file), symbolize_names: true)
+      # Resolve extension paths
+      file      = __FILE__.dup.force_encoding('UTF-8')
+      dir       = __dir__.dup.force_encoding('UTF-8')
+      EXT_ID    = File.basename(file, ".*")
+      EXT_DIR   = File.join(dir, EXT_ID)
+      loader    = File.join(EXT_DIR, "bootstrap")
+      info_json = File.join(EXT_DIR, "info.json")
 
-      EXTENSION   = info_hash.freeze
+      # Read extension metadata
+      EXTENSION = JSON.parse(File.read(info_json), symbolize_names: true)
+      EXT_NAME  = EXTENSION[:name].to_s
 
-      name        = EXTENSION[:name]
-      version     = EXTENSION[:version]
-      description = EXTENSION[:description]
-      creator     = EXTENSION[:creator]
-      copyright   = EXTENSION[:copyright]
-
-      @ext = SketchupExtension.new(name, loader)
-      @ext.version     = version
-      @ext.description = description
-      @ext.creator     = creator
-      @ext.copyright   = copyright
+      # Register extension
+      @ext = SketchupExtension.new(EXT_NAME, loader)
+      @ext.version     = EXTENSION[:version].to_s
+      @ext.description = EXTENSION[:description].to_s
+      @ext.creator     = EXTENSION[:creator].to_s
+      @ext.copyright   = EXTENSION[:copyright].to_s
 
       Sketchup.register_extension(@ext, true)
       file_loaded(__FILE__)
@@ -33,5 +32,5 @@ module ASM_Extensions
       @ext
     end
 
-  end
-end
+  end # module FaceUp
+end # module ASM_Extensions

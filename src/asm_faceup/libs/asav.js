@@ -1,4 +1,5 @@
 let DEBUG_MODE = false;
+window.APP_I18N = window.APP_I18N || { locale: 'en-US', data: {} };
 
 // Debug Icon
 function updateDebugIcon(isDebug) {
@@ -16,7 +17,6 @@ function updateDebugIcon(isDebug) {
 function updateDebugState(isDebug) {
   const nextState = !!isDebug;
   if (DEBUG_MODE === nextState) {
-    // No change, nothing to do
     return;
   }
 
@@ -43,101 +43,67 @@ function settingsJSON(config) {
     }
 
     if (window.app) {
+      window._settingsLoading = true;
+
       window.app.settingsTest1       = config.settings_test1;
       window.app.settingsTest2       = config.settings_test2;
       window.app.settingsTest3       = config.settings_test3;
       window.app.settingsLanguage    = config.language;
       window.app.settingsContextMenu = config.context_menu;
+      window.app.darkMode            = config.dark_mode;
       window.app.debugMode           = config.debug_mode;
-    }
-    
-    // Update the baseline AFTER loading the real config
-    if (window.app) {
-      window.app.initialSettings = JSON.stringify(window.app.currentSettings());
+
+      window.app.$nextTick(() => {
+        window._settingsLoading = false;
+        window.app.appReady = true;
+      });
     }
 
-    // Sync local state + icon
     updateDebugState(config.debug_mode);
+
+    // Update the baseline AFTER loading the real config
+    window.app.initialSettings = JSON.stringify(window.app.currentSettings());
 
   } catch (e) {
     console.error("settingsJSON failed:", e, config);
   }
 }
 
-// Ruby → JS (info)
-function infoJSON(meta) {
+// Ruby → JS (i18n)
+function i18nJSON(jsonStr) {
   try {
-    if (typeof meta === "string") {
-      meta = JSON.parse(meta);
+    const payload = JSON.parse(jsonStr);
+    window.APP_I18N = payload || window.APP_I18N;
+
+    if (window.app) {
+      window.app.i18nLocale = window.APP_I18N.locale || 'en-US';
+      window.app.i18nData   = window.APP_I18N.data   || {};
+      window.app.i18nReady  = true;
     }
-
-    if (!window.app) return;
-
-    var name        = meta.name        || "";
-    var version     = meta.version     || "";
-    var description = meta.description || "";
-    var copyright   = meta.copyright   || "";
-    var release     = meta.release     || "";
-    var update      = meta.update      || "";
-    var url_ew      = meta.url_ew      || "";
-    var url_su      = meta.url_su      || "";
-    var url_gh      = meta.url_gh      || "";
-
-    window.app.extName        = name;
-    window.app.extDescription = description;
-    window.app.extVersion     = version;
-    window.app.extCopyright   = copyright;
-    window.app.extRelease     = release;
-    window.app.extUpdate      = update;
-    window.app.extEW          = url_ew;
-    window.app.extSU          = url_su;
-    window.app.extGH          = url_gh;
-
   } catch (e) {
-    console.error("infoJSON failed:", e, meta);
-  }
-}
-
-// Thanks content
-function thanksContent() {
-  var selectedValue   = document.getElementById("formSelect").value;
-  var contentPrefix   = "content_";
-  var contentElements = document.querySelectorAll('[id^="' + contentPrefix + '"]');
-
-  contentElements.forEach(function(contentElement) {
-    contentElement.style.display = "none";
-  });
-
-  var selectedContent = document.getElementById(contentPrefix + selectedValue);
-  if (selectedContent) {
-    selectedContent.style.display = "block";
+    console.error("i18nJSON parse error:", e);
   }
 }
 
 // Debug Trigger
 function debugTrigger() {
-  // Target: the Settings navigation link
   const settingsLink = document.getElementById("settings-nav");
   if (!settingsLink) return;
 
   let clickCount = 0;
   let timer      = null;
 
-  const REQUIRED_CLICKS = 5;      // Number of clicks required to trigger debug mode
-  const TIME_WINDOW_MS  = 1000;   // Time window (in ms) to perform all clicks
+  const REQUIRED_CLICKS = 5;
+  const TIME_WINDOW_MS  = 1000;
 
   settingsLink.addEventListener("click", () => {
     clickCount++;
 
-    // User completed the hidden click sequence
     if (clickCount === REQUIRED_CLICKS) {
-      // Toggle local debug state
       const newState = !DEBUG_MODE;
 
-      // Update UI and internal state (updates DEBUG_MODE + icon)
       updateDebugState(newState);
 
-      // Send only debug_mode to Ruby using user_settings callback
       if (window.sketchup && typeof sketchup.user_settings === "function") {
         const payload = JSON.stringify({ debug_mode: newState });
         sketchup.user_settings(payload);
@@ -147,7 +113,6 @@ function debugTrigger() {
       return;
     }
 
-    // Start timeout when the first click is detected
     if (!timer) {
       timer = setTimeout(() => {
         resetSequence();
@@ -156,10 +121,8 @@ function debugTrigger() {
   });
 
   function resetSequence() {
-    // Reset the click counter
     clickCount = 0;
 
-    // Clear the timer
     if (timer) {
       clearTimeout(timer);
       timer = null;
@@ -183,11 +146,84 @@ function debugLoader() {
 // Context menu control (enabled only in debug mode)
 function contextMenu() {
   document.addEventListener("contextmenu", function (event) {
-    // When debug mode is OFF, prevent the default Chromium context menu
     if (!DEBUG_MODE) {
       event.preventDefault();
     }
   });
+}
+
+// Persist which accordion panel is open
+const ACCORDION_KEY = "faceup:last_open_accordion";
+const ACCORDION_ROOT_SEL = "#accordionSettings";
+const DEFAULT_PANEL_ID = "collapseTab1";
+
+function getSavedAccordionId() {
+  try {
+    return localStorage.getItem(ACCORDION_KEY);
+  } catch (_) {
+    return null;
+  }
+}
+
+function setSavedAccordionId(id) {
+  try {
+    localStorage.setItem(ACCORDION_KEY, id);
+  } catch (_) {}
+}
+
+function clearSavedAccordionId() {
+  try {
+    localStorage.removeItem(ACCORDION_KEY);
+  } catch (_) {}
+}
+
+function openAccordionPanelById(id, animate = true) {
+  const targetId = (id && document.getElementById(id)) ? id : DEFAULT_PANEL_ID;
+
+  if (animate) {
+    $("#" + targetId).collapse("show");
+  } else {
+    $(ACCORDION_ROOT_SEL + " .collapse")
+      .removeClass("show");
+    $(ACCORDION_ROOT_SEL + " [data-toggle='collapse']")
+      .addClass("collapsed")
+      .attr("aria-expanded", "false");
+
+    $("#" + targetId).addClass("show");
+    $('[data-target="#' + targetId + '"]')
+      .removeClass("collapsed")
+      .attr("aria-expanded", "true");
+  }
+}
+
+let ACCORDION_WIRED = false;
+
+function wireAccordionPersistence() {
+  const $root = $(ACCORDION_ROOT_SEL);
+  if (!$root.length) return;
+
+  if (ACCORDION_WIRED) {
+    const savedId = getSavedAccordionId();
+    openAccordionPanelById(savedId, false);
+    return;
+  }
+
+  $root.off("shown.bs.collapse.asavPersist");
+  $root.off("hidden.bs.collapse.asavPersist");
+
+  const savedId = getSavedAccordionId();
+  openAccordionPanelById(savedId, false);
+
+  $root.on("shown.bs.collapse.asavPersist", ".collapse", function () {
+    setSavedAccordionId(this.id);
+  });
+
+  $root.on("hidden.bs.collapse.asavPersist", ".collapse", function () {
+    const anyOpen = $root.find(".collapse.show").length > 0;
+    if (!anyOpen) clearSavedAccordionId();
+  });
+
+  ACCORDION_WIRED = true;
 }
 
 debugLoader();

@@ -1,0 +1,29 @@
+# Bundler
+Gemfile.lock
+.bundle/
+vendor/bundle/
+
+# RuboCop cache
+.rubocop-https---*/
+
+# Solargraph
+.solargraph.yml
+.yardoc/
+.yardopts
+
+# SketchUp
+*.skb
+AutoSave_*.skp
+snapshots/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+*.swp
+*~
+
+# Claude Code
+.claude/

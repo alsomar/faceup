@@ -5,9 +5,9 @@
   "creator": "Alejandro Soriano",
   "copyright": "© Alejandro Soriano, 2023-2024",
   "license": "MIT License",
-  "release": "December 1st, 2023",
-  "update": "June 7th, 2024",
-  "url_ew":"https://extensions.sketchup.com/",
-  "url_su":"https://sketchucation.com",
-  "url_gu": "https://github.com/alsomar/faceup"
+  "release": "2023-12-01",
+  "update": "2024-06-07",
+  "url_ew": "https://extensions.sketchup.com/",
+  "url_su": "https://sketchucation.com",
+  "url_gh": "https://github.com/alsomar/faceup"
 }

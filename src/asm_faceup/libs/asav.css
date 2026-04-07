@@ -1,7 +1,20 @@
+[v-cloak] { display: none !important; }
+
 html, body {
   height: 100%;
   margin: 0;
   overflow: hidden;
+  cursor: default;
+  user-select: none;
+}
+
+input, textarea, select {
+  user-select: text;
+  cursor: text;
+}
+
+select {
+  cursor: pointer;
 }
 
 button:disabled {
@@ -13,23 +26,64 @@ button:disabled {
   cursor: not-allowed !important;
 }
 
-.accordion .card .card-header {
-    padding-top: 0.66rem;
-    padding-bottom: 0.4rem;
+/* Fix: wrapped label text in custom-switch overflowing the container. */
+.custom-switch {
+  height: auto;
+  min-height: 2rem;
+}
+
+.custom-switch .custom-control-label {
+  display: block;
+  line-height: 1.5;
+  padding-top: 0.4rem;
 }
 
 .card-custom {
-  padding-left: .4rem;
-  padding-top: .4rem;
-  padding-bottom: 1rem;
+  padding-left: 1rem;
+  padding-top: 0;
 }
 
 .message {
   margin-bottom: 0;
 }
 
+.asav-message {
+  font-size: 1rem;
+  font-style: italic;
+  margin-bottom: 1rem;
+  padding: 1rem;
+}
+
 .modus-sidebar {
   flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Sidebar icons: muted by default, active restores normal color */
+.left-nav-icon {
+  color: #a3a6b1;
+  transition: color 0.15s ease;
+}
+
+.left-nav-icon.is-active {
+  color: #217cbb;
+}
+
+/* Suppress Modus hover background on all sidebar nav items */
+.modus-body .modus-sidebar .nav-link:hover {
+  background-color: transparent;
+}
+
+/* Restore normal color on hover */
+.modus-body .modus-sidebar .nav-link:hover .left-nav-icon:not(.text-trimble-yellow):not(.is-active):not(.asav-dark-toggle) {
+  color: inherit;
+}
+
+/* Dark mode toggle: yellow on hover */
+.modus-body .modus-sidebar .nav-link:hover .asav-dark-toggle {
+  color: #FFBE00;
 }
 
 .modus-content-rows {
@@ -44,10 +98,15 @@ button:disabled {
   position: relative;
 }
 
-.asav-content{
-  padding: 1rem 1.2rem 1rem 1rem;
+.asav-content {
+  padding: 1rem .5rem 0 1rem;
   overflow-y: auto;
-  background-color:rgb(246, 246, 246);
+  scrollbar-gutter: stable;
+  background-color: rgb(246, 246, 246);
+}
+
+.card:last-child {
+  border-bottom: none !important;
 }
 
 .asav-hr {
@@ -57,24 +116,12 @@ button:disabled {
   padding: 0;
 }
 
-.asav-br {
-  position: absolute;
-  bottom: 1rem;
-  right: 1rem;
-}
-
-.asav-br button {
-  min-width: 18ch;
-}
-
-/* Transición suave */
 .card-header[role="button"] h6 {
-  transition: color 0.15s ease, 
+  transition: color 0.15s ease,
               font-weight 0.15s ease,
               font-size 0.15s ease;
 }
 
-/* Cerrado (no activo) */
 .card-header[role="button"].collapsed {
   padding-top: 0.6rem !important;
   padding-bottom: 0.6rem !important;
@@ -86,8 +133,162 @@ button:disabled {
   font-size: 0.9rem;
 }
 
-/* Abierto (activo) */
 .card-header[role="button"]:not(.collapsed) h6 {
   color: #005f9e;
   font-weight: 600;
+}
+
+.asav-reveal-enter-active {
+  transition: opacity 80ms ease, transform 140ms ease;
+}
+
+.asav-reveal-enter {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.asav-reveal-enter-to {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.asav-reveal-leave-active {
+  transition: none;
+}
+
+.asav-reveal-leave {
+  opacity: 1;
+}
+
+.asav-reveal-leave-to {
+  opacity: 0;
+}
+
+.modus-footer {
+  padding-right: 1.25rem;
+}
+
+body.modal-open .modus-footer {
+  z-index: 0;
+}
+
+/* ── Dark mode ─────────────────────────────────────────────────────────── */
+
+body.dark-mode .left-nav-icon.is-active {
+  color: #4da6ff;
+}
+
+body.dark-mode .modus-sidebar .nav-link:hover .left-nav-icon:not(.is-active):not(.asav-dark-toggle) {
+  color: #e0e0e0;
+}
+
+body.dark-mode .asav-content {
+  scrollbar-color: #3a3a6a #1a1a2e;
+  scrollbar-width: thin;
+}
+
+body.dark-mode {
+  background-color: #1a1a2e;
+  color: #8a92a2;
+}
+
+body.dark-mode .modus-sidebar {
+  background-color: #16213e;
+  border-color: #3a3a6a;
+}
+
+body.dark-mode .asav-content {
+  background-color: #1a1a2e;
+}
+
+body.dark-mode .modus-footer {
+  background-color: #16213e;
+  border-color: #3a3a6a;
+}
+
+body.dark-mode .card {
+  background-color: #16213e;
+  border-color: #3a3a6a !important;
+}
+
+body.dark-mode .card-header {
+  background-color: #0f3460;
+  border-color: #3a3a6a !important;
+}
+
+body.dark-mode #accordionSettings .card {
+  background-color: #1a1a2e;
+  border-color: #3a3a6a !important;
+}
+
+body.dark-mode #accordionSettings .card-header {
+  background-color: #1a1a2e;
+  border-color: #3a3a6a !important;
+}
+
+body.dark-mode .btn-outline-primary {
+  color: #4da6ff;
+  border-color: #4da6ff;
+}
+
+body.dark-mode .btn-outline-primary:hover {
+  background-color: #4da6ff;
+  color: #1a1a2e;
+}
+
+body.dark-mode .card-header[role="button"].collapsed h6 {
+  color: #8a92a2 !important;
+}
+
+body.dark-mode .card-header[role="button"]:not(.collapsed) h6 {
+  color: #4da6ff !important;
+}
+
+body.dark-mode .form-control,
+body.dark-mode .custom-select {
+  background-color: #1e2d50;
+  border-color: #3a3a6a;
+  color: #c0c8d8;
+}
+
+body.dark-mode hr,
+body.dark-mode .asav-hr {
+  border-color: #3a3a6a;
+}
+
+body.dark-mode .message {
+  background-color: #1c2440;
+  border-color: #3a3a6a;
+  color: #8a92a2;
+}
+
+body.dark-mode .modal-content {
+  background-color: #16213e;
+  border-color: #3a3a6a;
+  color: #8a92a2;
+}
+
+body.dark-mode .modal-footer {
+  border-color: #3a3a6a;
+}
+
+body.dark-mode .text-muted {
+  color: #8a8aaa !important;
+}
+
+body.dark-mode input:disabled {
+  color: #7a7aaa;
+}
+
+body.dark-mode .custom-control-input:disabled ~ .custom-control-label {
+  color: #7a7aaa;
+}
+
+body.dark-mode h1, body.dark-mode .h1,
+body.dark-mode h2, body.dark-mode .h2,
+body.dark-mode h3, body.dark-mode .h3,
+body.dark-mode h4, body.dark-mode .h4,
+body.dark-mode h5, body.dark-mode .h5,
+body.dark-mode h6, body.dark-mode .h6 {
+  color: #e0e0e0 !important;
 }

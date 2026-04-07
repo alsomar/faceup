@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en-US" class="h-100">
 <head>
+  <meta charset="UTF-8">
   <link href="../vendor/modus/modus.min.css" rel="stylesheet">
   <link href="../vendor/modus/modus-layout.min.css" rel="stylesheet">
   <link href="../vendor/modus/modus-icons.css" rel="stylesheet">
@@ -12,280 +13,385 @@
   <script src="../libs/asav.js"></script>
 </head>
 <body>
+  <script>if (localStorage.getItem('asav_dark_mode') === 'true') document.body.classList.add('dark-mode');</script>
   <div class="asav-root">
-    <div id="app" class="modus-layout">
+    <div id="app" class="modus-layout" v-cloak v-show="appReady">
       <hr class="asav-hr">
+
       <!-- Body -->
       <div class="modus-body sidebar-closed d-flex" data-modus-item="body" id="Z">
+
         <!-- Sidebar -->
         <nav class="nav flex-column modus-sidebar pt-2">
           <ul>
-          <li>
-            <a href="#" class="nav-link" @click.prevent="section = 'settings'" id="settings-nav">
-              <span class="left-nav-icon" id="settings-icon">
-                <i class="modus-icons">settings</i>
-              </span>
-              Settings
-            </a>
-          </li>
-          <li>
-            <a href="#" class="nav-link" @click.prevent="section = 'about'">
-            <span class="left-nav-icon"><i class="modus-icons">info</i></span>
-            About
-            </a>
-          </li>
-          <li>
-            <a href="#" class="nav-link" @click.prevent="section = 'thanks'">
-            <span class="left-nav-icon"><i class="modus-icons">people_group</i></span>
-            Thanks
-            </a>
-          </li>
+            <li>
+              <a href="#" class="nav-link d-flex align-items-center" @click.prevent="section = 'settings'" id="settings-nav">
+                <span
+                  class="left-nav-icon d-inline-flex align-items-center"
+                  id="settings-icon"
+                  :class="{ 'is-active': section === 'settings' && !debugMode, 'text-trimble-yellow': debugMode }"
+                  data-toggle="tooltip" data-placement="right" data-container="body" data-boundary="window"
+                  :data-original-title="t('html.settings.tooltip')"
+                >
+                  <i class="modus-icons">settings</i>
+                </span>
+              </a>
+            </li>
+            <li>
+              <a href="#" class="nav-link d-flex align-items-center" @click.prevent="section = 'about'">
+                <span
+                  class="left-nav-icon d-inline-flex align-items-center"
+                  :class="{ 'is-active': section === 'about' }"
+                  data-toggle="tooltip" data-placement="right" data-container="body" data-boundary="window"
+                  :data-original-title="t('html.about.tooltip')"
+                >
+                  <i class="modus-icons">info</i>
+                </span>
+              </a>
+            </li>
+            <li>
+              <a href="#" class="nav-link d-flex align-items-center" @click.prevent="section = 'thanks'">
+                <span
+                  class="left-nav-icon d-inline-flex align-items-center"
+                  :class="{ 'is-active': section === 'thanks' }"
+                  data-toggle="tooltip" data-placement="right" data-container="body" data-boundary="window"
+                  :data-original-title="t('html.thanks.tooltip')"
+                >
+                  <i class="modus-icons">heart</i>
+                </span>
+              </a>
+            </li>
           </ul>
+
+          <!-- Dark Mode Toggle -->
+          <div class="mt-auto pb-2">
+            <a
+              href="#"
+              class="nav-link d-flex align-items-center"
+              @click.prevent="toggleDarkMode($event)"
+            >
+              <span
+                class="left-nav-icon asav-dark-toggle d-inline-flex align-items-center"
+                data-toggle="tooltip"
+                data-placement="right"
+                data-container="body"
+                data-boundary="window"
+                :data-original-title="darkMode ? t('html.settings.dark_mode_tooltip') : t('html.settings.light_mode_tooltip')"
+              >
+                <i class="modus-icons">{{ darkMode ? 'moon' : 'sun' }}</i>
+              </span>
+            </a>
+          </div>
         </nav>
+
         <!-- Content -->
         <div class="modus-content-rows asav-content">
+
           <!-- Settings -->
           <div v-show="section === 'settings'">
+
             <!-- Title -->
             <div class="modus-content-row pb-2">
-                <span class="h2 font-weight-bold">{{ extName }}</span>
-                <span class="h2 font-weight-normal">&#32;&middot;&#32;</span>
-                <span class="h2 font-weight-normal">Settings</span>
+              <span class="h2 font-weight-bold">{{ t('html.info.name') }}</span>
+              <span class="h2 font-weight-normal">&#32;&middot;&#32;</span>
+              <span class="h2 font-weight-normal">{{ t('html.settings.title') }}</span>
             </div>
+
             <!-- Accordion -->
             <div class="accordion" id="accordionSettings">
-              <!-- Second Tab -->
+
+              <!-- Test Options -->
               <div class="card">
-                <!-- Second Tab: Title -->
                 <div class="card-header collapsed" id="accordionTab2" role="button"
                   data-toggle="collapse" data-target="#collapseTab2"
                   aria-expanded="false" aria-controls="collapseTab2">
-                  <h6 class="mb-0" id="collapsible-group-item-2">
-                    Second Tab</h6>
+                  <h6 class="mb-0">{{ t('html.settings.second_tab') }}</h6>
                 </div>
-                <!-- Second Tab: Settings -->
                 <div class="collapse" id="collapseTab2"
                   aria-labelledby="accordionTab2" data-parent="#accordionSettings">
                   <div class="card-body card-custom">
-                      <!-- Test Button 1 -->
-                      <div class="custom-control custom-switch">
-                          <input type="checkbox" class="custom-control-input" v-model="settingsTest1" id="settingsTest1">
-                          <label class="custom-control-label" for="settingsTest1">Test Button 1</label>
-                      </div>
-                      <!-- Test Button 2 -->
-                      <div class="custom-control custom-switch">
-                          <input type="checkbox" class="custom-control-input" v-model="settingsTest2" id="settingsTest2">
-                          <label class="custom-control-label" for="settingsTest2">
-                            Test Button 2</label>
-                      </div>
-                      <!-- Test Button 3 -->
-                      <div class="custom-control custom-switch">
-                          <input type="checkbox" class="custom-control-input" id="settingsTest3"
-                            v-model="settingsTest3" :disabled="!settingsTest2">
-                          <label class="custom-control-label" :class="!settingsTest2 ? 'text-muted' : ''" for="settingsTest3">
-                            Test Button 3</label>
-                      </div>
+
+                    <!-- Test Option 1 -->
+                    <div class="custom-control custom-switch">
+                      <input type="checkbox" class="custom-control-input" v-model="settingsTest1" id="settingsTest1">
+                      <label class="custom-control-label" for="settingsTest1">{{ t('html.settings.test_button_1') }}</label>
+                    </div>
+
+                    <!-- Test Option 2 -->
+                    <div class="custom-control custom-switch">
+                      <input type="checkbox" class="custom-control-input" v-model="settingsTest2" id="settingsTest2">
+                      <label class="custom-control-label" for="settingsTest2">{{ t('html.settings.test_button_2') }}</label>
+                    </div>
+
+                    <!-- Test Option 3 -->
+                    <div class="custom-control custom-switch">
+                      <input type="checkbox" class="custom-control-input" id="settingsTest3"
+                        v-model="settingsTest3" :disabled="!settingsTest2">
+                      <label class="custom-control-label" :class="!settingsTest2 ? 'text-muted' : ''" for="settingsTest3">
+                        {{ t('html.settings.test_button_3') }}
+                      </label>
+                    </div>
+
                   </div>
                 </div>
               </div>
+
               <!-- General Options -->
               <div class="card">
-                <!-- General Options: Title -->
                 <div class="card-header" id="accordionTab1" role="button"
                   data-toggle="collapse" data-target="#collapseTab1"
                   aria-expanded="true" aria-controls="collapseTab1">
-                  <h6 class="mb-0" id="collapsible-group-item-1">
-                    General Options</h6>
+                  <h6 class="mb-0">{{ t('html.settings.general_options') }}</h6>
                 </div>
-                <!-- General Options: Settings -->
                 <div class="collapse show" id="collapseTab1"
                   aria-labelledby="accordionTab1" data-parent="#accordionSettings">
                   <div class="card-body card-custom">
-                      <!-- Language -->
-                      <div class="mb-2">
-                        <label for="settingsLanguage">Language selection</label>
-                        <select class="custom-select form-control" v-model="settingsLanguage" id="settingsLanguage">
-                        <option value="eng">English</option>
-                        <option value="spa">Espa&ntilde;ol</option>
-                        </select>
-                        <!-- Language info -->
-                        <div class="message message-primary">
-                          <i class="modus-icons notranslate" aria-hidden="true">info</i>You may need to restart SketchUp to update the language settings.
-                        </div>
+
+                    <!-- Language -->
+                    <div class="mb-2">
+                      <label for="settingsLanguage">{{ t('html.settings.language_selection') }}</label>
+                      <select class="custom-select form-control" v-model="settingsLanguage" id="settingsLanguage">
+                        <option value="auto">{{ t('html.settings.system_language') }}</option>
+                        <option value="en-US">English (United States)</option>
+                        <option value="es-ES">Espa&ntilde;ol (Espa&ntilde;a)</option>
+                      </select>
+                      <div class="message message-primary">
+                        <i class="modus-icons notranslate" aria-hidden="true">info</i>{{ t('html.settings.language_hint') }}
                       </div>
-                      <!-- Context Menu -->
-                      <div class="custom-control custom-switch">
-                          <input type="checkbox" class="custom-control-input" v-model="settingsContextMenu" id="settingsContextMenu">
-                          <label class="custom-control-label" for="settingsContextMenu">Display context menu</label>
+                    </div>
+
+                    <!-- Context Menu -->
+                    <div class="custom-control custom-switch">
+                      <input type="checkbox" class="custom-control-input" v-model="settingsContextMenu" id="settingsContextMenu">
+                      <label class="custom-control-label" for="settingsContextMenu">{{ t('html.settings.context_menu') }}</label>
+                    </div>
+
+                    <!-- Show Reset Button -->
+                    <div class="custom-control custom-switch">
+                      <input type="checkbox" class="custom-control-input" v-model="showReset" id="showReset">
+                      <label class="custom-control-label" for="showReset">{{ t('html.settings.reset_button') }}</label>
+                    </div>
+
+                    <!-- Reset Button -->
+                    <transition name="asav-reveal">
+                      <div v-if="showReset" class="mt-2" style="padding-left: 2.5rem">
+                        <button type="button" class="btn btn-danger" data-toggle="modal" data-target="#resetConfirmModal">
+                          {{ t('html.settings.reset_settings') }}
+                        </button>
                       </div>
+                    </transition>
+
                   </div>
                 </div>
               </div>
+
             </div>
-            <!-- Save Settings Button -->
-            <div class="modus-content-row text-right asav-br">
-              <button
-                type="button"
-                class="btn"
-                :class="hasChanges ? 'btn-primary' : 'btn-outline-dark'"
-                @click="acceptButton"
-                :disabled="!hasChanges"
-              >
-                {{ hasChanges ? 'Save Settings' : 'Settings Saved' }}
-              </button>
-              </div>
+
           </div>
+
           <!-- About -->
           <div v-show="section === 'about'">
-              <!-- Title -->
-              <div class="modus-content-row pb-3">
-                  <span class="h2 font-weight-bold">{{ extName }}</span>
-                  <span class="h2 font-weight-normal">&#32;&middot;&#32;</span>
-                  <span class="h2 font-weight-normal">About</span>
-              </div>
-              <!-- Extension Info -->
-              <div class="modus-content-row">
-                  <p class="body-text">
-                      Version <span>{{ extVersion }}</span> (<span>{{ extUpdate }}</span>)</p>
-                  <p class="card-text text-secondary font-italic">
-                      <span>{{ extDescription }}</span></p>
-                  <hr>
-                  <p class="body-text">
-                      Designed and developed by <a href="https://alejandrosoriano.xyz" target="_blank">Alejandro Soriano</a>.</p>
-                  <p class="body-text">
-                      This extension uses <a href="https://modus-bootstrap.trimble.com/" target="_blank">Trimble Modus Bootstrap</a>.</p>
-              </div>
-              <!-- Warning box -->
-              <div class="modus-content-column border border-warning bg-white my-4">
-                  <div class="form-row m-3">
-                      <div class="col-auto">
-                          <i class="modus-icons" aria-hidden="true">alert_outlined</i>
-                      </div>
-                      <div class="col">
-                          <p class="card-text"><span>{{ extName }}</span> is <span class="font-weight-bold">free</span>!</p>
-                      </div>
-                  </div>
-                  <div class="form-row mx-3">
-                      <p class="body-text">Please beware of scammers and trust only <a v-bind:href="extEW" target="_blank" rel="noopener">Extension Warehouse</a> and <a v-bind:href="extSU" target="_blank" rel="noopener">SketchUcation</a> as your download sources for <span>{{ extName }}</span>.
-                  </div>
-              </div>
+
+            <!-- Title -->
+            <div class="modus-content-row pb-3">
+              <span class="h2 font-weight-bold">{{ t('html.info.name') }}</span>
+              <span class="h2 font-weight-normal">&#32;&middot;&#32;</span>
+              <span class="h2 font-weight-normal">{{ t('html.about.title') }}</span>
+            </div>
+
+            <!-- Extension Info -->
+            <div class="modus-content-row">
+              <p class="body-text">
+                {{ t('html.about.version') }}<span>{{ t('html.info.version') }}</span> (<span>{{ t('html.info.update') }}</span>)
+              </p>
+              <p class="body-text" v-html="t('html.about.designed_by')"></p>
+              <p class="body-text" v-html="t('html.about.uses')"></p>
+              <p class="body-text" v-html="t('html.about.warning')"></p>
+            </div>
+
           </div>
+
           <!-- Thanks -->
           <div v-show="section === 'thanks'">
-              <!-- Title -->
-              <div class="modus-content-row pb-3">
-                  <span class="h2 font-weight-bold">{{ extName }}</span>
-                  <span class="h2 font-weight-normal">&#32;&middot;&#32;</span>
-                  <span class="h2 font-weight-normal">Thanks</span>
-              </div>
-              <!-- Intro -->
-              <div class="modus-content-row">
-                  <p class="body-text">Many thanks to the developer communities at the <a href="https://forums.sketchup.com" class="font-weight-bolder" target="_blank">SketchUp Forums</a> and <a href="https://community.sketchucation.com" class="font-weight-bolder" target="_blank">SketchUcation</a> for their support, insights, and shared knowledge that help make extensions like <span>{{ extName }}</span> possible.</p>
-                  <p class="body-text">Your support through <a href="https://patreon.com/alejandrosoriano" class="font-weight-bolder" target="_blank">Patreon</a> is invaluable. As a solo developer, it helps me continue creating and improving extensions like <span>{{ extName }}</span>.</p>
-                  <p class="body-text">This release could not have been possible without the help of these <a href="https://patreon.com/alejandrosoriano" class="font-weight-bolder" target="_blank">Patreon</a> supporters.</p>
-                  <p class="body-text font-weight-bolder">Thank you for your generosity!</p>
-              </div>
-              <!-- Release List -->
-              <div class="modus-content-row">
-                  <select class="custom-select form-control" id="formSelect" onchange="thanksContent()">
-                      <option value="0101" selected>Test Extension 1.0.1 - Released on June 7th, 2024</option>
-                      <option value="0100">Test Extension 1.0.0 - Released on April 12th, 2024</option>
-                  </select>
-              </div>
-              <!-- Patreons -->
-              <div class="modus-content-row pt-3">
-                  <div id="content_0101" style="display: block;">
-                      <p>Contenido de Test Extension 1.0.1</p>
-                      <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla varius tincidunt nunc, vel faucibus sapien finibus vitae. Integer vehicula pulvinar magna, eget accumsan odio condimentum vel. Proin ac sagittis risus. Mauris bibendum, lectus at fermentum luctus, libero leo aliquam mauris, sed porttitor lacus orci ut nibh. Sed at leo dui. Vivamus eget magna eget nunc tristique ultrices vel a augue. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Etiam non magna ligula. Vestibulum scelerisque sapien nec tortor pretium tincidunt. Quisque rutrum sapien nec felis accumsan fringilla. Integer gravida mauris eget orci vehicula pretium.
 
-Aliquam erat volutpat. Sed sodales egestas lorem, eget tincidunt metus faucibus sit amet. Duis nec pretium nunc, in posuere nunc. Integer pulvinar risus nec nisi tincidunt imperdiet. Aenean ultrices leo sed leo eleifend dapibus. Sed tristique interdum lacus, id volutpat lacus pulvinar ut. Suspendisse sit amet magna ultricies, hendrerit turpis nec, dictum est. Donec luctus justo ac urna aliquet, vitae pulvinar libero ornare. Suspendisse nec vestibulum est, eget sodales nunc. Aliquam condimentum nulla nec nibh sagittis, vitae dapibus nisi tincidunt.</p>
-                  </div>
-                  <div id="content_0100" style="display: none;">
-                      <p>Contenido de Test Extension 1.0.0</p>
-                  </div>
-              </div>
-              <p class="body-text">Sincerely,<br>Alejandro Soriano</p>
+            <!-- Title -->
+            <div class="modus-content-row pb-3">
+              <span class="h2 font-weight-bold">{{ t('html.info.name') }}</span>
+              <span class="h2 font-weight-normal">&#32;&middot;&#32;</span>
+              <span class="h2 font-weight-normal">{{ t('html.thanks.title') }}</span>
+            </div>
+
+            <div class="modus-content-row">
+              <p class="body-text" v-html="t('html.thanks.txt1')"></p>
+              <p class="body-text" v-html="t('html.thanks.txt2')"></p>
+              <p class="body-text font-weight-bolder">{{ t('html.thanks.txt3') }}</p>
+            </div>
+
+            <p class="body-text">
+              {{ t('html.thanks.txt4') }}<br>
+              {{ t('html.info.author') }}
+            </p>
+
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Reset Confirm Modal -->
+      <div class="modal fade" id="resetConfirmModal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+          <div class="modal-content">
+            <div class="modal-body">
+              {{ t('html.settings.reset_confirm_body') }}
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-dismiss="modal" @click="showReset = false">
+                {{ t('html.settings.reset_confirm_no') }}
+              </button>
+              <button type="button" class="btn btn-danger" @click="resetSettings">
+                {{ t('html.settings.reset_confirm_yes') }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
       <!-- Footer -->
       <div class="modus-footer">
         <p class="form-labels text-gray-4 text-right mr-1 my-0">
-          <span>{{ extCopyright}}</span>
+          <span>{{ t('html.info.copyright') }}</span>
         </p>
       </div>
     </div>
   </div>
-  <script>
-    window.sketchup = window.sketchup || {};
-  </script>
+
+  <script>window.sketchup = window.sketchup || {};</script>
   <script>
     window.app = new Vue({
       el: '#app',
       data() {
         return {
+          // Language
+          i18nLocale: (window.APP_I18N && window.APP_I18N.locale) ? window.APP_I18N.locale : 'en-US',
+          i18nData:   (window.APP_I18N && window.APP_I18N.data)   ? window.APP_I18N.data   : {},
+          i18nReady:  false,
+
           // Initial section
           section: 'settings',
 
-          // Metadata
-          extName: "",
-          extVersion: "",
-          extDescription: "",
-          extCopyright: "",
-          extRelease: "",
-          extUpdate: "",
-          extEW: "",
-          extSU: "",
-          extGH: "",
-
-          // General options
+          // Test settings
           settingsTest1: true,
           settingsTest2: false,
           settingsTest3: false,
-          settingsLanguage: 'eng',
+
+          // General Options
+          settingsLanguage:    'auto',
           settingsContextMenu: false,
+          showReset:           false,
+
+          // Dark mode
+          darkMode: false,
 
           // Debug
-          debug_mode: false,
+          debugMode: false,
 
-          // Initial state snapshot
-          initialSettings: ''    
+          // Flags
+          _hydrating: true,
+          initialSettings: '',
+
+          // UI ready flag
+          appReady: false
         };
       },
       mounted() {
-        if (window.sketchup && window.sketchup.ready) {
-          window.sketchup.ready();
-        }
-        this.initialSettings = JSON.stringify(this.currentSettings());
-      },
-      watch:{
-        settingsTest2(enabled) {
-          if (!enabled) {
-            this.settingsTest3 = false;
+        document.documentElement.lang = this.i18nLocale;
+
+        this.$nextTick(() => {
+          wireAccordionPersistence();
+          $('[data-toggle="tooltip"]').tooltip();
+
+          if (window.sketchup && window.sketchup.ready) {
+            window.sketchup.ready();
           }
+
+          if (!this.i18nReady) this.i18nReady = true;
+          this._hydrating = false;
+        });
+      },
+      watch: {
+        darkMode(val) {
+          document.body.classList.toggle('dark-mode', val);
+          localStorage.setItem('asav_dark_mode', val);
+        },
+        i18nLocale(val) {
+          document.documentElement.lang = val;
+        },
+        settingsTest2() { this._dependentToggles(); },
+
+        settingsSnapshot(newVal, oldVal) {
+          if (this._hydrating) return;
+          if (window._settingsLoading) return;
+          if (newVal === oldVal) return;
+          this.saveNow();
         }
       },
       methods: {
+        t(path) {
+          if (!this.i18nReady) return "";
+          const parts = (path || '').split('.');
+          let obj = this.i18nData;
+          for (const key of parts) {
+            if (!obj || obj[key] === undefined) return '\u26A0 ' + path;
+            obj = obj[key];
+          }
+          return obj;
+        },
         currentSettings() {
           return {
             settings_test1: this.settingsTest1,
             settings_test2: this.settingsTest2,
             settings_test3: this.settingsTest3,
-            language: this.settingsLanguage,
-            context_menu: this.settingsContextMenu,
-            debug_mode: this.debugMode,
+            language:       this.settingsLanguage,
+            context_menu:   this.settingsContextMenu,
+            dark_mode:      this.darkMode,
+            // debug_mode intentionally excluded
           };
         },
-        acceptButton() {
-          const settings = this.currentSettings();
-          sketchup.user_settings(JSON.stringify(settings));
-          // Update baseline after saving
-          this.initialSettings = JSON.stringify(settings);
+        _dependentToggles() {
+          if (!this.settingsTest2) this.settingsTest3 = false;
+        },
+        saveNow() {
+          if (window.sketchup && window.sketchup.user_settings) {
+            window.sketchup.user_settings(JSON.stringify(this.currentSettings()));
+          }
+        },
+        toggleDarkMode(ev) {
+          $(ev.currentTarget).find('[data-toggle="tooltip"]').tooltip('hide');
+          if (ev && ev.currentTarget) ev.currentTarget.blur();
+          this.darkMode = !this.darkMode;
+        },
+        resetSettings() {
+          $('#resetConfirmModal').modal('hide');
+          this._hydrating = true;
+
+          this.settingsTest1       = true;
+          this.settingsTest2       = false;
+          this.settingsTest3       = false;
+          this.settingsLanguage    = 'auto';
+          this.settingsContextMenu = false;
+          this.darkMode            = false;
+          this.showReset           = false;
+
+          this._hydrating = false;
+          this.$nextTick(() => this.saveNow());
+        },
+        openUrl(url) {
+          window.open(url);
         }
       },
       computed: {
-        hasChanges() {
-          return JSON.stringify(this.currentSettings()) !== this.initialSettings;
+        settingsSnapshot() {
+          return JSON.stringify(this.currentSettings());
         }
       }
     });
