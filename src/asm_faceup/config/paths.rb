@@ -18,9 +18,11 @@ module ASM_Extensions
     FileUtils.mkdir_p(CONFIG_FOLDER)
 
     # Extension paths
-    PATH_VENDOR = File.join(EXT_DIR, "vendor").freeze
-    PATH_ICONS  = File.join(EXT_DIR, "icons").freeze
-    PATH_HTML   = File.join(EXT_DIR, "html").freeze
+    PATH_VENDOR   = File.join(EXT_DIR, "vendor").freeze
+    PATH_GRAPHICS = File.join(EXT_DIR, "graphics").freeze
+    PATH_ICONS    = File.join(PATH_GRAPHICS, "icons").freeze
+    PATH_CURSORS  = File.join(PATH_GRAPHICS, "cursors").freeze
+    PATH_HTML     = File.join(EXT_DIR, "html").freeze
 
     # User config file
     CONFIG_FILE = File.join(CONFIG_FOLDER, ".#{EXT_ID}.json").freeze
