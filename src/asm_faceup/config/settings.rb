@@ -14,6 +14,11 @@ module ASM_Extensions
       language: "auto",
       context_menu: false,
 
+      # Extruder Options
+      use_last_extrusion:      true,
+      default_extrusion:       0,
+      default_extrusion_unit:  "model",
+
       # Inner Options
       dark_mode: false,
       debug_mode: false

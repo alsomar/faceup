@@ -8,6 +8,7 @@ module ASM_Extensions
 
       EXPECTED_KEYS = %i[
         settings_test1 settings_test2 settings_test3
+        use_last_extrusion default_extrusion default_extrusion_unit
         language context_menu dark_mode debug_mode
       ].freeze
 
@@ -29,12 +30,22 @@ module ASM_Extensions
       def test_default_config_boolean_values
         bool_keys = %i[
           settings_test1 settings_test2 settings_test3
-          context_menu dark_mode debug_mode
+          use_last_extrusion context_menu dark_mode debug_mode
         ]
         bool_keys.each do |key|
           val = DEFAULT_CONFIG[key]
           assert [true, false].include?(val), "#{key} should be boolean, got #{val.class}"
         end
+      end
+
+      def test_default_config_default_extrusion_is_numeric
+        val = DEFAULT_CONFIG[:default_extrusion]
+        assert val.is_a?(Numeric), "default_extrusion should be Numeric, got #{val.class}"
+      end
+
+      def test_default_config_default_extrusion_unit_is_string
+        val = DEFAULT_CONFIG[:default_extrusion_unit]
+        assert_instance_of String, val
       end
 
       def test_default_config_language_is_string

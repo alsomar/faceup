@@ -53,6 +53,10 @@ function settingsJSON(config) {
       window.app.darkMode            = config.dark_mode;
       window.app.debugMode           = config.debug_mode;
 
+      if (typeof window.onExtensionSettings === "function") {
+        window.onExtensionSettings(config);
+      }
+
       window.app.$nextTick(() => {
         window._settingsLoading = false;
         window.app.appReady = true;

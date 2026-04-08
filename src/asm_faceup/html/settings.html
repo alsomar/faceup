@@ -11,6 +11,7 @@
   <script src="../vendor/vue.min.js"></script>
   <!-- <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script> -->
   <script src="../libs/asav.js"></script>
+  <script src="../libs/faceup.js"></script>
 </head>
 <body>
   <script>if (localStorage.getItem('asav_dark_mode') === 'true') document.body.classList.add('dark-mode');</script>
@@ -130,6 +131,50 @@
                       <label class="custom-control-label" :class="!settingsTest2 ? 'text-muted' : ''" for="settingsTest3">
                         {{ t('html.settings.test_button_3') }}
                       </label>
+                    </div>
+
+                  </div>
+                </div>
+              </div>
+
+              <!-- Extruder Options -->
+              <div class="card">
+                <div class="card-header collapsed" id="accordionTab3" role="button"
+                  data-toggle="collapse" data-target="#collapseTab3"
+                  aria-expanded="false" aria-controls="collapseTab3">
+                  <h6 class="mb-0">{{ t('html.settings.extruder_options') }}</h6>
+                </div>
+                <div class="collapse" id="collapseTab3"
+                  aria-labelledby="accordionTab3" data-parent="#accordionSettings">
+                  <div class="card-body card-custom">
+
+                    <!-- Use Last Extrusion -->
+                    <div class="custom-control custom-switch">
+                      <input type="checkbox" class="custom-control-input" v-model="settingsUseLastExtrusion" id="settingsUseLastExtrusion">
+                      <label class="custom-control-label" for="settingsUseLastExtrusion">{{ t('html.settings.use_last_extrusion') }}</label>
+                    </div>
+
+                    <!-- Default Extrusion Value -->
+                    <div class="mt-2">
+                      <label for="settingsDefaultExtrusion" :class="settingsUseLastExtrusion ? 'text-muted' : ''">
+                        {{ t('html.settings.default_extrusion') }}
+                      </label>
+                      <div class="input-group">
+                        <input type="number" min="0" step="any" class="form-control" id="settingsDefaultExtrusion"
+                          v-model="settingsDefaultExtrusion"
+                          :disabled="settingsUseLastExtrusion">
+                        <div class="input-group-append">
+                          <select class="custom-select" v-model="settingsDefaultExtrusionUnit"
+                            :disabled="settingsUseLastExtrusion">
+                            <option value="model">{{ t('html.settings.unit_model') }}</option>
+                            <option value="mm">{{ t('html.settings.unit_mm') }}</option>
+                            <option value="cm">{{ t('html.settings.unit_cm') }}</option>
+                            <option value="m">{{ t('html.settings.unit_m') }}</option>
+                            <option value="inch">{{ t('html.settings.unit_inch') }}</option>
+                            <option value="feet">{{ t('html.settings.unit_feet') }}</option>
+                          </select>
+                        </div>
+                      </div>
                     </div>
 
                   </div>
@@ -284,6 +329,11 @@
           settingsTest2: false,
           settingsTest3: false,
 
+          // Extruder Options
+          settingsUseLastExtrusion:     true,
+          settingsDefaultExtrusion:     '0',
+          settingsDefaultExtrusionUnit: 'model',
+
           // General Options
           settingsLanguage:    'auto',
           settingsContextMenu: false,
@@ -348,12 +398,15 @@
         },
         currentSettings() {
           return {
-            settings_test1: this.settingsTest1,
-            settings_test2: this.settingsTest2,
-            settings_test3: this.settingsTest3,
-            language:       this.settingsLanguage,
-            context_menu:   this.settingsContextMenu,
-            dark_mode:      this.darkMode,
+            settings_test1:      this.settingsTest1,
+            settings_test2:      this.settingsTest2,
+            settings_test3:      this.settingsTest3,
+            use_last_extrusion:       this.settingsUseLastExtrusion,
+            default_extrusion:        this.settingsDefaultExtrusion,
+            default_extrusion_unit:   this.settingsDefaultExtrusionUnit,
+            language:            this.settingsLanguage,
+            context_menu:        this.settingsContextMenu,
+            dark_mode:           this.darkMode,
             // debug_mode intentionally excluded
           };
         },
@@ -374,13 +427,16 @@
           $('#resetConfirmModal').modal('hide');
           this._hydrating = true;
 
-          this.settingsTest1       = true;
-          this.settingsTest2       = false;
-          this.settingsTest3       = false;
-          this.settingsLanguage    = 'auto';
-          this.settingsContextMenu = false;
-          this.darkMode            = false;
-          this.showReset           = false;
+          this.settingsTest1              = true;
+          this.settingsTest2              = false;
+          this.settingsTest3              = false;
+          this.settingsUseLastExtrusion     = true;
+          this.settingsDefaultExtrusion     = '0';
+          this.settingsDefaultExtrusionUnit = 'model';
+          this.settingsLanguage           = 'auto';
+          this.settingsContextMenu        = false;
+          this.darkMode                   = false;
+          this.showReset                  = false;
 
           this._hydrating = false;
           this.$nextTick(() => this.saveNow());
