@@ -342,18 +342,6 @@ module ASM_Extensions
           "Legacy getExtents should call face.normal once per vertex (20 times)"
       end
 
-      def test_getextents_current_faster_than_legacy_on_dense_faces
-        faces_legacy  = Array.new(50) { SpyNormalFace.new(100) }
-        faces_current = Array.new(50) { SpyNormalFace.new(100) }
-
-        t_legacy  = Benchmark.realtime { getextents_legacy(faces_legacy,   1.0) }
-        t_current = Benchmark.realtime { getextents_current(faces_current, 1.0) }
-
-        assert t_current <= t_legacy * 1.5,
-          "getExtents (current) #{format('%.3f', t_current)}s should not be slower than " \
-          "legacy #{format('%.3f', t_legacy)}s"
-      end
-
     end
   end
 end

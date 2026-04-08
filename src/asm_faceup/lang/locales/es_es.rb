@@ -78,9 +78,22 @@ module ASM_Extensions
               save_settings:  "Guardar ajustes",
               settings_saved: "Ajustes guardados"
             }
+          },
+
+          tools: {
+            extruder: {
+              vcb_label:      "Longitud: ",
+              status_idle:    "Extrusor: Introduce una distancia o haz clic para fijar el origen | Tab para invertir | Enter/DblClic para confirmar | Espacio para cancelar",
+              status_pick:    "Extrusor: Haz clic para fijar la distancia | Tab para invertir | ESC para restablecer el origen | Espacio para cancelar",
+              status_adjust:  "Extrusor: Haz clic para ajustar | Tab para invertir | Enter/DblClic para confirmar | ESC para restablecer el origen | Espacio para cancelar",
+              status_flipped: " [INVERTIDO]",
+              no_faces:       "No hay caras seleccionadas.",
+              invalid_length: "Longitud no válida. Introduce una distancia correcta.",
+            }
           }
 
         }.freeze
+
       end
     end
   end

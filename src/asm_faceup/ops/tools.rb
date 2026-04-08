@@ -117,7 +117,7 @@ module ASM_Extensions
         @selected_faces = selection.grep(Sketchup::Face)
 
         if @selected_faces.empty?
-          UI.messagebox("No faces selected.")
+          UI.messagebox(Lang.t(:tools, :extruder, :no_faces))
           UI.start_timer(0) { Sketchup.active_model.select_tool(nil) }
           return
         end
@@ -210,7 +210,7 @@ module ASM_Extensions
 
       def onKeyDown(key, repeat, flags, view)
         case key
-        when 27 # ESC — reset anchor, or exit tool if no anchor
+        when KEYS[:esc] # reset anchor, or exit tool if no anchor
           if @anchor_set
             @anchor_set      = false
             @distance_frozen = false
@@ -223,22 +223,22 @@ module ASM_Extensions
           else
             reset_tool
           end
-        when 32 # Space — exit without confirming
+        when KEYS[:space] # exit without confirming
           Sketchup::set_status_text("", SB_PROMPT)
           UI.start_timer(0) { Sketchup.active_model.select_tool(nil) }
           return true
-        when 9 # Tab — flip extrusion direction
+        when KEYS[:tab] # flip extrusion direction
           @flip_direction    = !@flip_direction
           @extrusion_distance = -@extrusion_distance
           update_vcb(nil, @extrusion_distance.to_s)
           update_status_text
           view.invalidate
           return true
-        when 37 # Left arrow — X axis (red)
+        when KEYS[:arrow_left]  # X axis (red)
           toggle_axis_lock(:x, view)
-        when 39 # Right arrow — Y axis (green)
+        when KEYS[:arrow_right] # Y axis (green)
           toggle_axis_lock(:y, view)
-        when 38 # Up arrow — Z axis (blue)
+        when KEYS[:arrow_up]    # Z axis (blue)
           toggle_axis_lock(:z, view)
         end
       end
@@ -273,20 +273,20 @@ module ASM_Extensions
           update_status_text
           view.invalidate
         rescue ArgumentError
-          Sketchup::set_status_text("Invalid length. Please enter a valid distance.", SB_PROMPT)
+          Sketchup::set_status_text(Lang.t(:tools, :extruder, :invalid_length), SB_PROMPT)
         end
       end
 
       private
 
       def update_status_text
-        dir = @flip_direction ? " [FLIPPED]" : ""
+        dir = @flip_direction ? Lang.t(:tools, :extruder, :status_flipped) : ""
         @status_text = if !@anchor_set
-          "Extruder: Enter distance or click to set origin | Tab to flip direction | Enter/DblClick to confirm | Space to cancel#{dir}"
+          "#{Lang.t(:tools, :extruder, :status_idle)}#{dir}"
         elsif !@distance_frozen
-          "Extruder: Click to set distance | Tab to flip direction | ESC to reset origin | Space to cancel#{dir}"
+          "#{Lang.t(:tools, :extruder, :status_pick)}#{dir}"
         else
-          "Extruder: Click to adjust | Tab to flip direction | Enter/DblClick to confirm | ESC to reset origin | Space to cancel#{dir}"
+          "#{Lang.t(:tools, :extruder, :status_adjust)}#{dir}"
         end
         Sketchup::set_status_text(@status_text)
       end
@@ -333,6 +333,8 @@ module ASM_Extensions
       end
 
       def draw_extrusion_preview(view)
+        return if @preview_cache.empty?
+
         gray_tris  = []
         gray_quads = []
         white_tris = []
@@ -353,7 +355,7 @@ module ASM_Extensions
             white_tris.concat(top)
           end
 
-          # Aristas superiores y verticales — solo aristas duras
+          # Top and vertical edges — hard edges only
           data[:hard_edges].each do |s, e|
             st = s.offset(n, dist)
             et = e.offset(n, dist)
@@ -361,8 +363,6 @@ module ASM_Extensions
           end
 
         end
-
-        return if gray_tris.empty?
 
         view.drawing_color = Sketchup::Color.new(220, 220, 220)
         view.draw(GL_TRIANGLES, gray_tris)
@@ -373,10 +373,10 @@ module ASM_Extensions
 
         view.drawing_color = 'blue'
 
-        # Cara superior siempre entera
+        # Top face outline — always drawn as a full loop
         @preview_cache.each { |data| view.draw(GL_LINE_LOOP, data[:loop_pts].map { |p| p.offset(data[:normal], @extrusion_distance) }) }
 
-        # Aristas superiores y verticales
+        # Top and vertical hard edges
         view.draw(GL_LINES, hard_lines) unless hard_lines.empty?
       end
 
@@ -396,6 +396,8 @@ module ASM_Extensions
         ents = Sketchup.active_model.active_entities
 
         # rubocop:disable SketchupSuggestions/AddGroup
+        # Process largest faces first: grouping a small face collapses its hole,
+        # which would inflate the area of a larger overlapping face processed later.
         groups_with_inner_edges = faces_with_inner_edges.sort_by { |face| -face.area }.map do |face|
           ents.add_group([face, *face.edges])
         end
@@ -423,11 +425,10 @@ module ASM_Extensions
       end
 
       def reset_tool
-        @selected_faces     = []
-        @groups             = []
-        @preview_cache      = []
-        @extrusion_distance = 1.m
-        @distance_entered   = false
+        @selected_faces   = []
+        @groups           = []
+        @preview_cache    = []
+        @distance_entered = false
         @anchor_set         = false
         @distance_frozen    = false
         @frozen_point       = nil
@@ -439,7 +440,7 @@ module ASM_Extensions
       end
 
       def update_vcb(label = nil, value = nil)
-        label ||= "Length: "
+        label ||= Lang.t(:tools, :extruder, :vcb_label)
         value ||= @extrusion_distance.to_s
 
         @current_vcb_label = label
@@ -469,6 +470,15 @@ module ASM_Extensions
         x: Sketchup::Color.new(255, 0,   0).freeze,
         y: Sketchup::Color.new(0,   128, 0).freeze,
         z: Sketchup::Color.new(0,   0,   255).freeze,
+      }.freeze
+
+      KEYS = {
+        esc:         27,
+        space:       32,
+        tab:          9,
+        arrow_left:  37,
+        arrow_right: 39,
+        arrow_up:    38,
       }.freeze
 
       CIRCLE_SEGMENTS = 16
@@ -541,11 +551,8 @@ module ASM_Extensions
         if ip.vertex
           INFERENCE_COLORS[:vertex]
         elsif ip.edge
-          mid = Geom::Point3d.new(
-            (ip.edge.start.position.x + ip.edge.end.position.x) / 2.0,
-            (ip.edge.start.position.y + ip.edge.end.position.y) / 2.0,
-            (ip.edge.start.position.z + ip.edge.end.position.z) / 2.0
-          )
+          s, e = ip.edge.start.position, ip.edge.end.position
+          mid  = Geom::Point3d.new((s.x + e.x) / 2.0, (s.y + e.y) / 2.0, (s.z + e.z) / 2.0)
           ip.position == mid ? INFERENCE_COLORS[:midpoint] : INFERENCE_COLORS[:edge]
         elsif ip.face
           INFERENCE_COLORS[:face]

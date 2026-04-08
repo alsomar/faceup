@@ -78,9 +78,22 @@ module ASM_Extensions
               save_settings:  "Save Settings",
               settings_saved: "Settings Saved"
             }
+          },
+
+          tools: {
+            extruder: {
+              vcb_label:      "Length: ",
+              status_idle:    "Extruder: Enter distance or click to set origin | Tab to flip direction | Enter/DblClick to confirm | Space to cancel",
+              status_pick:    "Extruder: Click to set distance | Tab to flip direction | ESC to reset origin | Space to cancel",
+              status_adjust:  "Extruder: Click to adjust | Tab to flip direction | Enter/DblClick to confirm | ESC to reset origin | Space to cancel",
+              status_flipped: " [FLIPPED]",
+              no_faces:       "No faces selected.",
+              invalid_length: "Invalid length. Please enter a valid distance.",
+            }
           }
 
         }.freeze
+
       end
     end
   end
