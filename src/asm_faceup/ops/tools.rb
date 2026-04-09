@@ -135,7 +135,6 @@ module ASM_Extensions
           }
         end
 
-        model.selection.clear
         update_vcb
         update_status_text
         model.active_view.invalidate
@@ -200,7 +199,8 @@ module ASM_Extensions
           @extrusion_distance = compute_pick_distance(@cursor_ip)
           @distance_entered   = true
           @distance_frozen    = true
-          @frozen_point       = @cursor_ip.position.clone
+          @frozen_point       = effective_cursor_position(view)
+          @frozen_ip          = snapped?(@cursor_ip) ? @cursor_ip : nil
           update_vcb(nil, @extrusion_distance.to_s)
           view.invalidate
           Debug.log(self.class, __method__, "Distance set: #{@extrusion_distance} — cursor=#{@cursor_ip.position}")
@@ -247,9 +247,11 @@ module ASM_Extensions
         @cursor_screen = Geom::Point3d.new(x, y, 0)
         @current_view  = view
         @cursor_ip.pick(view, x, y)
-        if @anchor_set && !@distance_frozen
-          @extrusion_distance = compute_pick_distance(@cursor_ip)
-          update_vcb(nil, @extrusion_distance.to_s)
+        if @anchor_set
+          if !@distance_frozen
+            @extrusion_distance = compute_pick_distance(@cursor_ip)
+            update_vcb(nil, @extrusion_distance.to_s)
+          end
         end
         view.invalidate
       end
@@ -269,6 +271,7 @@ module ASM_Extensions
           raw = text.to_l.abs
           @extrusion_distance = (@flip_direction ? -raw : raw).to_l
           @distance_entered   = true
+          @distance_frozen    = true
           update_vcb(nil, @extrusion_distance.to_s)
           update_status_text
           view.invalidate
@@ -432,6 +435,7 @@ module ASM_Extensions
         @anchor_set         = false
         @distance_frozen    = false
         @frozen_point       = nil
+        @frozen_ip          = nil
         @axis_lock          = nil
         @flip_direction     = false
         @operation_open     = false
@@ -454,7 +458,7 @@ module ASM_Extensions
         vertex:   Sketchup::Color.new(0,   255, 0).freeze,   # green
         midpoint: Sketchup::Color.new(0,   191, 255).freeze, # light blue
         edge:     Sketchup::Color.new(255, 0,   0).freeze,   # red
-        face:     Sketchup::Color.new(0,   0,   128).freeze, # dark blue
+        face:     Sketchup::Color.new(0,   50,  210).freeze, # electric blue
         none:     Sketchup::Color.new(0,   0,   0).freeze,   # black — free point
       }.freeze
 
@@ -507,13 +511,30 @@ module ASM_Extensions
 
           draw_frozen_marker(view, @frozen_point, @anchor_ip.position) if @frozen_point
 
-          draw_inference_circle(view, @anchor_ip.position, inference_color(@anchor_ip))
+          if @distance_frozen
+            draw_inference_circle(view, @anchor_ip.position, ORANGE)
+          elsif snapped?(@anchor_ip)
+            draw_inference_marker(view, @anchor_ip.position, @anchor_ip)
+          end
         end
 
-        # Cursor circle — use snapped position if valid, otherwise raw screen position
+        # Cursor marker — projected point on the locked axis (or raw screen if no snap)
         if @cursor_ip.valid?
-          cursor_pos = effective_cursor_position(view)
-          draw_inference_circle(view, cursor_pos, inference_color(@cursor_ip))
+          cursor_pos   = effective_cursor_position(view)
+          snap_differs = @axis_lock && @cursor_ip.position != cursor_pos
+
+          # Projected point on the axis: black when derived from a reference snap,
+          # inference marker otherwise (no axis lock, or snap already lies on the axis).
+          if snap_differs
+            draw_inference_circle(view, cursor_pos, INFERENCE_COLORS[:none])
+            view.line_stipple = '.'
+            view.drawing_color = INFERENCE_COLORS[:none]
+            view.draw(GL_LINES, @cursor_ip.position, cursor_pos)
+            view.line_stipple = ''
+            draw_inference_marker(view, @cursor_ip.position, @cursor_ip)
+          elsif snapped?(@cursor_ip)
+            draw_inference_marker(view, cursor_pos, @cursor_ip)
+          end
         else
           view.drawing_color = INFERENCE_COLORS[:none]
           view.draw2d(GL_POLYGON, circle_pts(@cursor_screen.x, @cursor_screen.y))
@@ -541,10 +562,29 @@ module ASM_Extensions
         end
       end
 
+      def diamond_pts(cx, cy, radius = 5)
+        [
+          Geom::Point3d.new(cx,          cy - radius, 0),
+          Geom::Point3d.new(cx + radius, cy,          0),
+          Geom::Point3d.new(cx,          cy + radius, 0),
+          Geom::Point3d.new(cx - radius, cy,          0),
+        ]
+      end
+
       def draw_inference_circle(view, point_3d, color)
         screen = view.screen_coords(point_3d)
         view.drawing_color = color
         view.draw2d(GL_POLYGON, circle_pts(screen.x, screen.y))
+      end
+
+      def draw_inference_marker(view, point_3d, ip)
+        screen = view.screen_coords(point_3d)
+        if ip.face && !ip.vertex && !ip.edge
+          view.drawing_color = INFERENCE_COLORS[:face]
+          view.draw2d(GL_POLYGON, diamond_pts(screen.x, screen.y))
+        else
+          draw_inference_circle(view, point_3d, inference_color(ip))
+        end
       end
 
       def inference_color(ip)
@@ -561,9 +601,18 @@ module ASM_Extensions
         end
       end
 
+      def snapped?(ip)
+        ip.vertex || ip.edge || ip.face
+      end
+
+
       def toggle_axis_lock(axis, view)
         return unless @anchor_set
         @axis_lock = (@axis_lock == axis) ? nil : axis
+        if !@distance_frozen && @cursor_ip.valid?
+          @extrusion_distance = compute_pick_distance(@cursor_ip)
+          update_vcb(nil, @extrusion_distance.to_s)
+        end
         update_status_text
         view.invalidate
       end
@@ -574,14 +623,22 @@ module ASM_Extensions
         anchor   = @anchor_ip.position
         axis_vec = AXIS_VECTORS[@axis_lock]
 
+        # If the cursor has snapped to a real point (vertex, midpoint, edge, face),
+        # project that point's snapped coordinate onto the locked axis directly.
+        # This lets the user reference geometry from other objects — only the
+        # axis-aligned component of the snapped position is used.
+        if @cursor_ip.valid?
+          return anchor.offset(axis_vec, (@cursor_ip.position - anchor).dot(axis_vec))
+        end
+
+        # No snap — fall back to projecting the camera ray onto the axis.
         if view && @cursor_screen
           ray = view.pickray(@cursor_screen.x.to_i, @cursor_screen.y.to_i)
           t   = closest_point_on_axis(anchor, axis_vec, ray[0], ray[1])
           return anchor.offset(axis_vec, t)
         end
 
-        return @cursor_ip.position unless @cursor_ip.valid?
-        anchor.offset(axis_vec, (@cursor_ip.position - anchor).dot(axis_vec))
+        @cursor_ip.position
       end
 
       def closest_point_on_axis(anchor, axis_vec, ray_origin, ray_dir)
