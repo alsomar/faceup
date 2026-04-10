@@ -91,10 +91,12 @@ module ASM_Extensions
         model = Sketchup.active_model
         @selected_faces     = []
         @groups             = []
+        default = default_extrusion_to_length(CONFIG[:default_extrusion], CONFIG[:default_extrusion_unit])
         @extrusion_distance = if CONFIG[:use_last_extrusion]
-          model.get_attribute('ASM_Extensions_FaceUp', 'last_extrusion_distance', 1.m)
+          stored = model.get_attribute('ASM_Extensions_FaceUp', 'last_extrusion_distance', nil)
+          stored ? stored : default
         else
-          default_extrusion_to_length(CONFIG[:default_extrusion], CONFIG[:default_extrusion_unit])
+          default
         end
         @status_text        = ""
         @distance_entered   = false
@@ -109,6 +111,7 @@ module ASM_Extensions
         @cursor_screen      = nil
         @current_view       = nil
         @preview_cache      = []
+        @dotted_axis        = nil
       end
 
       def activate
@@ -145,6 +148,7 @@ module ASM_Extensions
           Sketchup.active_model.abort_operation
           @operation_open = false
         end
+        extruder(view) if @distance_frozen && !@selected_faces.empty?
         @anchor_set      = false
         @distance_frozen = false
         @frozen_point    = nil
@@ -183,7 +187,11 @@ module ASM_Extensions
       end
 
       def draw(view)
-        draw_extrusion_preview(view) if !@extrusion_distance.zero? && (@anchor_set || @distance_entered)
+        if @extrusion_distance.zero?
+          draw_face_highlight(view)
+        else
+          draw_extrusion_preview(view)
+        end
         draw_pick_guide(view)
       end
 
@@ -211,11 +219,13 @@ module ASM_Extensions
       def onKeyDown(key, repeat, flags, view)
         case key
         when KEYS[:esc] # reset anchor, or exit tool if no anchor
-          if @anchor_set
+          if @anchor_set || @distance_frozen
             @anchor_set      = false
             @distance_frozen = false
             @frozen_point    = nil
+            @frozen_ip       = nil
             @axis_lock       = nil
+            @dotted_axis     = nil
             @anchor_ip       = Sketchup::InputPoint.new
             update_status_text
             view.invalidate
@@ -223,7 +233,7 @@ module ASM_Extensions
           else
             reset_tool
           end
-        when KEYS[:space] # exit without confirming
+        when KEYS[:space] # SketchUp intercepts Space and calls deactivate directly
           Sketchup::set_status_text("", SB_PROMPT)
           UI.start_timer(0) { Sketchup.active_model.select_tool(nil) }
           return true
@@ -295,7 +305,7 @@ module ASM_Extensions
       end
 
       def extruder(view)
-        return if @selected_faces.empty? || @extrusion_distance.zero?
+        return if @selected_faces.empty?
 
         faces_to_extrude = @selected_faces
         @selected_faces  = []  # stop preview immediately
@@ -333,6 +343,18 @@ module ASM_Extensions
         end
 
         view.invalidate
+      end
+
+      def draw_face_highlight(view)
+        return if @preview_cache.empty?
+
+        tris = @preview_cache.flat_map { |data| data[:tris].flatten }
+
+        view.drawing_color = Sketchup::Color.new('white')
+        view.draw(GL_TRIANGLES, tris)
+
+        view.drawing_color = 'blue'
+        @preview_cache.each { |data| view.draw(GL_LINE_LOOP, data[:loop_pts]) }
       end
 
       def draw_extrusion_preview(view)
@@ -503,15 +525,25 @@ module ASM_Extensions
               Geom::Point3d.new(s2.x, s2.y, 0))
             view.line_width = 1
           else
-            view.drawing_color = 'red'
-            view.line_stipple  = '-'
-            view.draw(GL_LINES, @anchor_ip.position, cursor_pos)
-            view.line_stipple  = ''
+            if !snapped?(@cursor_ip)
+              update_dotted_axis(@anchor_ip.position, cursor_pos)
+            else
+              @dotted_axis = nil
+            end
+            if @anchor_set
+              view.drawing_color = ORANGE
+              view.draw(GL_LINES, @anchor_ip.position, cursor_pos)
+            else
+              view.drawing_color = @dotted_axis ? AXIS_COLORS[@dotted_axis] : INFERENCE_COLORS[:none]
+              view.line_stipple  = '-'
+              view.draw(GL_LINES, @anchor_ip.position, cursor_pos)
+              view.line_stipple  = ''
+            end
           end
 
           draw_frozen_marker(view, @frozen_point, @anchor_ip.position) if @frozen_point
 
-          if @distance_frozen
+          if @anchor_set
             draw_inference_circle(view, @anchor_ip.position, ORANGE)
           elsif snapped?(@anchor_ip)
             draw_inference_marker(view, @anchor_ip.position, @anchor_ip)
@@ -536,6 +568,7 @@ module ASM_Extensions
             draw_inference_marker(view, cursor_pos, @cursor_ip)
           end
         else
+          @dotted_axis = nil
           view.drawing_color = INFERENCE_COLORS[:none]
           view.draw2d(GL_POLYGON, circle_pts(@cursor_screen.x, @cursor_screen.y))
         end
@@ -603,6 +636,42 @@ module ASM_Extensions
 
       def snapped?(ip)
         ip.vertex || ip.edge || ip.face
+      end
+
+      DOTTED_SNAP_DEG    = 5.0  # degrees from axis to enter snap
+      DOTTED_RELEASE_DEG = 7.0  # degrees from axis to exit snap (2° hysteresis)
+
+      def update_dotted_axis(from, to)
+        vec = to - from
+        return if vec.length < 1e-10
+
+        # Find the axis whose direction is closest to vec (parallel or anti-parallel)
+        best_axis = nil
+        best_deg  = nil
+
+        AXIS_VECTORS.each do |axis, axis_vec|
+          angle_rad = vec.angle_between(axis_vec)
+          # Map to [0, 90] — both parallel (0°) and anti-parallel (180°) count
+          deg = (angle_rad * 180.0 / Math::PI)
+          deg = 180.0 - deg if deg > 90.0
+
+          if best_deg.nil? || deg < best_deg
+            best_axis = axis
+            best_deg  = deg
+          end
+        end
+
+        # Hysteresis: measure against the currently snapped axis to release it
+        if @dotted_axis
+          current_vec = AXIS_VECTORS[@dotted_axis]
+          angle_rad   = vec.angle_between(current_vec)
+          current_deg = (angle_rad * 180.0 / Math::PI)
+          current_deg = 180.0 - current_deg if current_deg > 90.0
+
+          @dotted_axis = nil if current_deg > DOTTED_RELEASE_DEG
+        end
+
+        @dotted_axis = best_axis if @dotted_axis.nil? && best_deg <= DOTTED_SNAP_DEG
       end
 
 
