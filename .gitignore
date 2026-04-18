@@ -14,7 +14,7 @@ vendor/bundle/
 # SketchUp
 *.skb
 AutoSave_*.skp
-snapshots/
+Snapshots/
 
 # OS
 .DS_Store
@@ -27,3 +27,4 @@ Thumbs.db
 
 # Claude Code
 .claude/
+CLAUDE.md

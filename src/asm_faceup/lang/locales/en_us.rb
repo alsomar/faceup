@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module ASM_Extensions
   module FaceUp
     module Lang
@@ -81,6 +79,10 @@ module ASM_Extensions
           },
 
           tools: {
+            summon_faces: {
+              no_edges:     "Please select some edges.",
+              no_selection: "There's nothing selected.",
+            },
             extruder: {
               vcb_label:      "Length: ",
               status_idle:    "Extruder: Enter distance or click to set origin | Tab to flip direction | Enter/DblClick to confirm | Space to cancel",

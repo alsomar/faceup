@@ -29,17 +29,5 @@ module ASM_Extensions
       faces(e) + edges(e)
     end
 
-    def self.check_selection(targets)
-      method_id = __method__
-
-      if targets.empty?
-        UI.messagebox(MESSAGES[:no_selection])
-        Debug.log(self, method_id, "Invalid selection: missing targets.")
-        return false
-      end
-
-      true
-    end
-
   end # module FaceUp
 end # module ASM_Extensions

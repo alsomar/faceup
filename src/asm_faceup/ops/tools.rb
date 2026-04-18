@@ -15,7 +15,7 @@ module ASM_Extensions
       presel_edges = selection.grep(Sketchup::Edge)
 
       if presel_edges.empty?
-        UI.messagebox(MESSAGES[:no_edges])
+        UI.messagebox(Lang.t(:tools, :summon_faces, :no_edges))
         return false
       end
 
@@ -90,7 +90,6 @@ module ASM_Extensions
       def initialize
         model = Sketchup.active_model
         @selected_faces     = []
-        @groups             = []
         default = default_extrusion_to_length(CONFIG[:default_extrusion], CONFIG[:default_extrusion_unit])
         @extrusion_distance = if CONFIG[:use_last_extrusion]
           stored = model.get_attribute('ASM_Extensions_FaceUp', 'last_extrusion_distance', nil)
@@ -99,7 +98,6 @@ module ASM_Extensions
           default
         end
         @status_text        = ""
-        @distance_entered   = false
         @anchor_set         = false
         @distance_frozen    = false
         @frozen_point       = nil
@@ -112,6 +110,8 @@ module ASM_Extensions
         @current_view       = nil
         @preview_cache      = []
         @dotted_axis        = nil
+        @inference_source   = nil
+        @cursor_was_snapped = false
       end
 
       def activate
@@ -149,10 +149,13 @@ module ASM_Extensions
           @operation_open = false
         end
         extruder(view) if @distance_frozen && !@selected_faces.empty?
-        @anchor_set      = false
-        @distance_frozen = false
-        @frozen_point    = nil
-        @axis_lock       = nil
+        @anchor_set         = false
+        @distance_frozen    = false
+        @frozen_point       = nil
+        @axis_lock          = nil
+        @dotted_axis        = nil
+        @inference_source   = nil
+        @cursor_was_snapped = false
         view.invalidate
       end
 
@@ -199,16 +202,13 @@ module ASM_Extensions
         unless @anchor_set
           @anchor_ip.pick(view, x, y)
           @cursor_ip.pick(view, x, y)
-          @anchor_set      = true
-          @distance_frozen = false
+          @anchor_set = true
           Debug.log(self.class, __method__, "Anchor set at #{@anchor_ip.position}")
         else
           @cursor_ip.pick(view, x, y)
           @extrusion_distance = compute_pick_distance(@cursor_ip)
-          @distance_entered   = true
           @distance_frozen    = true
           @frozen_point       = effective_cursor_position(view)
-          @frozen_ip          = snapped?(@cursor_ip) ? @cursor_ip : nil
           update_vcb(nil, @extrusion_distance.to_s)
           view.invalidate
           Debug.log(self.class, __method__, "Distance set: #{@extrusion_distance} — cursor=#{@cursor_ip.position}")
@@ -220,13 +220,14 @@ module ASM_Extensions
         case key
         when KEYS[:esc] # reset anchor, or exit tool if no anchor
           if @anchor_set || @distance_frozen
-            @anchor_set      = false
-            @distance_frozen = false
-            @frozen_point    = nil
-            @frozen_ip       = nil
-            @axis_lock       = nil
-            @dotted_axis     = nil
-            @anchor_ip       = Sketchup::InputPoint.new
+            @anchor_set         = false
+            @distance_frozen    = false
+            @frozen_point       = nil
+            @axis_lock          = nil
+            @dotted_axis        = nil
+            @inference_source   = nil
+            @cursor_was_snapped = false
+            @anchor_ip          = Sketchup::InputPoint.new
             update_status_text
             view.invalidate
             return true
@@ -257,11 +258,24 @@ module ASM_Extensions
         @cursor_screen = Geom::Point3d.new(x, y, 0)
         @current_view  = view
         @cursor_ip.pick(view, x, y)
-        if @anchor_set
-          if !@distance_frozen
-            @extrusion_distance = compute_pick_distance(@cursor_ip)
-            update_vcb(nil, @extrusion_distance.to_s)
-          end
+
+        was_snapped = @cursor_was_snapped
+        @cursor_was_snapped = snapped?(@cursor_ip)
+
+        if @cursor_was_snapped
+          @inference_source = @cursor_ip.position.clone
+          @dotted_axis      = nil
+        elsif was_snapped
+          @dotted_axis = nil
+        elsif !@cursor_ip.valid?
+          # Cursor completely lost — inference broken, like SketchUp native behavior.
+          @inference_source = nil
+          @dotted_axis      = nil
+        end
+
+        if @anchor_set && !@distance_frozen
+          @extrusion_distance = compute_pick_distance(@cursor_ip)
+          update_vcb(nil, @extrusion_distance.to_s)
         end
         view.invalidate
       end
@@ -280,7 +294,6 @@ module ASM_Extensions
         begin
           raw = text.to_l.abs
           @extrusion_distance = (@flip_direction ? -raw : raw).to_l
-          @distance_entered   = true
           @distance_frozen    = true
           update_vcb(nil, @extrusion_distance.to_s)
           update_status_text
@@ -321,9 +334,9 @@ module ASM_Extensions
         @operation_open = true
 
         begin
-          @groups = face2group(faces_to_extrude)
-          xtrd_groups(@groups, @extrusion_distance)
-          model.selection.add(@groups)
+          groups = face2group(faces_to_extrude)
+          xtrd_groups(groups, @extrusion_distance)
+          model.selection.add(groups)
           model.set_attribute('ASM_Extensions_FaceUp', 'last_extrusion_distance', @extrusion_distance)
           model.commit_operation
           @operation_open = false
@@ -353,7 +366,7 @@ module ASM_Extensions
         view.drawing_color = Sketchup::Color.new('white')
         view.draw(GL_TRIANGLES, tris)
 
-        view.drawing_color = 'blue'
+        view.drawing_color = PREVIEW_BLUE
         @preview_cache.each { |data| view.draw(GL_LINE_LOOP, data[:loop_pts]) }
       end
 
@@ -396,7 +409,7 @@ module ASM_Extensions
         view.drawing_color = Sketchup::Color.new('white')
         view.draw(GL_TRIANGLES, white_tris)
 
-        view.drawing_color = 'blue'
+        view.drawing_color = PREVIEW_BLUE
 
         # Top face outline — always drawn as a full loop
         @preview_cache.each { |data| view.draw(GL_LINE_LOOP, data[:loop_pts].map { |p| p.offset(data[:normal], @extrusion_distance) }) }
@@ -450,15 +463,15 @@ module ASM_Extensions
       end
 
       def reset_tool
-        @selected_faces   = []
-        @groups           = []
-        @preview_cache    = []
-        @distance_entered = false
+        @selected_faces     = []
+        @preview_cache      = []
         @anchor_set         = false
         @distance_frozen    = false
         @frozen_point       = nil
-        @frozen_ip          = nil
         @axis_lock          = nil
+        @dotted_axis        = nil
+        @inference_source   = nil
+        @cursor_was_snapped = false
         @flip_direction     = false
         @operation_open     = false
         Sketchup::set_status_text("", SB_PROMPT)
@@ -484,7 +497,8 @@ module ASM_Extensions
         none:     Sketchup::Color.new(0,   0,   0).freeze,   # black — free point
       }.freeze
 
-      ORANGE = Sketchup::Color.new(255, 140, 0).freeze
+      ORANGE        = Sketchup::Color.new(255, 140, 0).freeze
+      PREVIEW_BLUE  = Sketchup::Color.new(0,   0,   200).freeze
 
       AXIS_VECTORS = {
         x: Geom::Vector3d.new(1, 0, 0),
@@ -509,8 +523,14 @@ module ASM_Extensions
 
       CIRCLE_SEGMENTS = 16
 
+      # Minimum pixel separation between cursor_pos and display_pos (the snapped point)
+      # before axis color and jump activate. Both must be visible simultaneously.
+      MIN_JUMP_PIXELS = 8
+
       def draw_pick_guide(view)
         return unless @cursor_screen
+
+        jump_visible = false  # hoisted — also used in cursor-dot section below
 
         # Lines first, points on top
         if @anchor_ip.valid?
@@ -525,20 +545,39 @@ module ASM_Extensions
               Geom::Point3d.new(s2.x, s2.y, 0))
             view.line_width = 1
           else
-            if !snapped?(@cursor_ip)
-              update_dotted_axis(@anchor_ip.position, cursor_pos)
-            else
-              @dotted_axis = nil
+            unless snapped?(@cursor_ip)
+              from = @inference_source || @anchor_ip.position
+              update_dotted_axis(from, cursor_pos)
             end
-            if @anchor_set
-              view.drawing_color = ORANGE
-              view.draw(GL_LINES, @anchor_ip.position, cursor_pos)
+
+            # Project display_pos onto the detected axis (jump).
+            display_pos = if @dotted_axis
+              base     = @inference_source || @anchor_ip.position
+              axis_vec = AXIS_VECTORS[@dotted_axis]
+              base.offset(axis_vec, (cursor_pos - base).dot(axis_vec))
             else
-              view.drawing_color = @dotted_axis ? AXIS_COLORS[@dotted_axis] : INFERENCE_COLORS[:none]
-              view.line_stipple  = '-'
-              view.draw(GL_LINES, @anchor_ip.position, cursor_pos)
-              view.line_stipple  = ''
+              cursor_pos
             end
+
+            # Only apply axis color when the jump is visually significant —
+            # i.e. display_pos and cursor_pos differ enough on screen.
+            # This prevents premature coloring before the snap is perceptible.
+            jump_visible = if @dotted_axis && @cursor_screen
+              s_cur  = view.screen_coords(cursor_pos)
+              s_disp = view.screen_coords(display_pos)
+              dx = s_cur.x - s_disp.x
+              dy = s_cur.y - s_disp.y
+              Math.sqrt(dx * dx + dy * dy) >= MIN_JUMP_PIXELS
+            else
+              false
+            end
+
+            s1 = view.screen_coords(@anchor_ip.position)
+            s2 = view.screen_coords(display_pos)
+            view.drawing_color = jump_visible ? axis_color_for_line(@anchor_ip.position, display_pos) : ORANGE
+            view.draw2d(GL_LINES,
+              Geom::Point3d.new(s1.x, s1.y, 0),
+              Geom::Point3d.new(s2.x, s2.y, 0))
           end
 
           draw_frozen_marker(view, @frozen_point, @anchor_ip.position) if @frozen_point
@@ -555,17 +594,40 @@ module ASM_Extensions
           cursor_pos   = effective_cursor_position(view)
           snap_differs = @axis_lock && @cursor_ip.position != cursor_pos
 
-          # Projected point on the axis: black when derived from a reference snap,
-          # inference marker otherwise (no axis lock, or snap already lies on the axis).
+          # When soft axis snap is active and the jump is visible, show cursor
+          # at the projected position. Otherwise stay at cursor_pos.
+          display_pos = if jump_visible && !@axis_lock && !snapped?(@cursor_ip)
+            base = @inference_source || (@anchor_ip.valid? ? @anchor_ip.position : cursor_pos)
+            axis_vec = AXIS_VECTORS[@dotted_axis]
+            base.offset(axis_vec, (cursor_pos - base).dot(axis_vec))
+          else
+            cursor_pos
+          end
+
+          # Dotted reference line: visible when the cursor is aligned with a principal
+          # axis from the reference point (@dotted_axis active). Not in arbitrary directions.
+          if @inference_source && @dotted_axis && !@axis_lock && !snapped?(@cursor_ip)
+            view.line_stipple = '.'
+            view.drawing_color = AXIS_COLORS[@dotted_axis]
+            view.draw(GL_LINES, @inference_source, display_pos)
+            view.line_stipple = ''
+            draw_inference_circle(view, @inference_source, INFERENCE_COLORS[:none])
+          end
+
           if snap_differs
-            draw_inference_circle(view, cursor_pos, INFERENCE_COLORS[:none])
+            draw_inference_circle(view, display_pos, INFERENCE_COLORS[:none])
             view.line_stipple = '.'
             view.drawing_color = INFERENCE_COLORS[:none]
-            view.draw(GL_LINES, @cursor_ip.position, cursor_pos)
+            view.draw(GL_LINES, @cursor_ip.position, display_pos)
             view.line_stipple = ''
             draw_inference_marker(view, @cursor_ip.position, @cursor_ip)
           elsif snapped?(@cursor_ip)
-            draw_inference_marker(view, cursor_pos, @cursor_ip)
+            draw_inference_marker(view, display_pos, @cursor_ip)
+          elsif jump_visible
+            draw_inference_circle(view, display_pos, INFERENCE_COLORS[:none])
+          elsif !@inference_source
+            # Free point with no reference — only show dot if axis snap is active
+            draw_inference_circle(view, display_pos, INFERENCE_COLORS[:none]) if @dotted_axis
           end
         else
           @dotted_axis = nil
@@ -616,7 +678,8 @@ module ASM_Extensions
           view.drawing_color = INFERENCE_COLORS[:face]
           view.draw2d(GL_POLYGON, diamond_pts(screen.x, screen.y))
         else
-          draw_inference_circle(view, point_3d, inference_color(ip))
+          view.drawing_color = inference_color(ip)
+          view.draw2d(GL_POLYGON, circle_pts(screen.x, screen.y))
         end
       end
 
@@ -638,8 +701,28 @@ module ASM_Extensions
         ip.vertex || ip.edge || ip.face
       end
 
-      DOTTED_SNAP_DEG    = 5.0  # degrees from axis to enter snap
-      DOTTED_RELEASE_DEG = 7.0  # degrees from axis to exit snap (2° hysteresis)
+      # Returns the axis color if the line from → to aligns within DOTTED_SNAP_DEG
+      # of a global axis; otherwise returns ORANGE (or the block result if given).
+      def axis_color_for_line(from, to)
+        vec = to - from
+        if vec.length > 1e-10
+          best_axis = nil
+          best_deg  = nil
+          AXIS_VECTORS.each do |axis, axis_vec|
+            deg = (vec.angle_between(axis_vec) * 180.0 / Math::PI)
+            deg = 180.0 - deg if deg > 90.0
+            if best_deg.nil? || deg < best_deg
+              best_axis = axis
+              best_deg  = deg
+            end
+          end
+          return AXIS_COLORS[best_axis] if best_deg && best_deg <= DOTTED_SNAP_DEG
+        end
+        block_given? ? yield : ORANGE
+      end
+
+      DOTTED_SNAP_DEG    = 4.0  # degrees from axis to enter snap
+      DOTTED_RELEASE_DEG = 7.0  # degrees from axis to exit snap (wider → stable hysteresis)
 
       def update_dotted_axis(from, to)
         vec = to - from

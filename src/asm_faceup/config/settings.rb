@@ -24,11 +24,6 @@ module ASM_Extensions
       debug_mode: false
     }.freeze
 
-    MESSAGES = {
-      no_selection: "There's nothing selected.",
-      no_edges:     "Please select some edges."
-    }.freeze
-
     def self.ensure_config
       FileUtils.mkdir_p(CONFIG_FOLDER)
       return if File.exist?(CONFIG_FILE)

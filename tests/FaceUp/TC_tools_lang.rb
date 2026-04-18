@@ -16,6 +16,11 @@ module ASM_Extensions
         invalid_length
       ].freeze
 
+      SUMMON_FACES_KEYS = %i[
+        no_edges
+        no_selection
+      ].freeze
+
       def setup
         Sketchup.require 'asm_faceup/lang/i18n'
         Sketchup.require 'asm_faceup/lang/locales/en_us'
@@ -91,6 +96,50 @@ module ASM_Extensions
       def test_status_flipped_es_contains_invertido
         Lang.configure("es-ES")
         assert_match(/INVERTIDO/i, Lang.t(:tools, :extruder, :status_flipped))
+      end
+
+      # --- tools.summon_faces keys ---
+
+      def test_all_tools_summon_faces_keys_resolve_in_en_us
+        Lang.configure("en-US")
+        SUMMON_FACES_KEYS.each do |key|
+          result = Lang.t(:tools, :summon_faces, key)
+          refute_match(/missing:/, result, "en-US missing key: tools.summon_faces.#{key}")
+          refute result.empty?, "en-US tools.summon_faces.#{key} should not be empty"
+        end
+      end
+
+      def test_all_tools_summon_faces_keys_resolve_in_es_es
+        Lang.configure("es-ES")
+        SUMMON_FACES_KEYS.each do |key|
+          result = Lang.t(:tools, :summon_faces, key)
+          refute_match(/missing:/, result, "es-ES missing key: tools.summon_faces.#{key}")
+          refute result.empty?, "es-ES tools.summon_faces.#{key} should not be empty"
+        end
+      end
+
+      def test_en_us_tools_summon_faces_has_all_keys
+        summon = Lang.locale_en_us[:tools][:summon_faces]
+        SUMMON_FACES_KEYS.each do |key|
+          assert summon.key?(key), "en-US tools.summon_faces missing key: #{key}"
+        end
+      end
+
+      def test_es_es_tools_summon_faces_has_all_keys
+        summon = Lang.locale_es_es[:tools][:summon_faces]
+        SUMMON_FACES_KEYS.each do |key|
+          assert summon.key?(key), "es-ES tools.summon_faces missing key: #{key}"
+        end
+      end
+
+      def test_summon_faces_keys_differ_between_locales
+        SUMMON_FACES_KEYS.each do |key|
+          Lang.configure("en-US")
+          en = Lang.t(:tools, :summon_faces, key)
+          Lang.configure("es-ES")
+          es = Lang.t(:tools, :summon_faces, key)
+          refute_equal en, es, "tools.summon_faces.#{key} should differ between locales"
+        end
       end
 
       # --- tools section is present in raw locale hashes ---
