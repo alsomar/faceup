@@ -27,10 +27,6 @@ module ASM_Extensions
         assert_equal 27, ExtruderTool::KEYS[:esc]
       end
 
-      def test_keys_space_is_32
-        assert_equal 32, ExtruderTool::KEYS[:space]
-      end
-
       def test_keys_tab_is_9
         assert_equal 9, ExtruderTool::KEYS[:tab]
       end

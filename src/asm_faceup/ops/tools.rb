@@ -234,10 +234,6 @@ module ASM_Extensions
           else
             reset_tool
           end
-        when KEYS[:space] # SketchUp intercepts Space and calls deactivate directly
-          Sketchup::set_status_text("", SB_PROMPT)
-          UI.start_timer(0) { Sketchup.active_model.select_tool(nil) }
-          return true
         when KEYS[:tab] # flip extrusion direction
           @flip_direction    = !@flip_direction
           @extrusion_distance = -@extrusion_distance
@@ -307,12 +303,12 @@ module ASM_Extensions
 
       def update_status_text
         dir = @flip_direction ? Lang.t(:tools, :extruder, :status_flipped) : ""
-        @status_text = if !@anchor_set
-          "#{Lang.t(:tools, :extruder, :status_idle)}#{dir}"
-        elsif !@distance_frozen
-          "#{Lang.t(:tools, :extruder, :status_pick)}#{dir}"
-        else
+        @status_text = if @distance_frozen
           "#{Lang.t(:tools, :extruder, :status_adjust)}#{dir}"
+        elsif !@anchor_set
+          "#{Lang.t(:tools, :extruder, :status_idle)}#{dir}"
+        else
+          "#{Lang.t(:tools, :extruder, :status_pick)}#{dir}"
         end
         Sketchup::set_status_text(@status_text)
       end
@@ -514,7 +510,6 @@ module ASM_Extensions
 
       KEYS = {
         esc:         27,
-        space:       32,
         tab:          9,
         arrow_left:  37,
         arrow_right: 39,
