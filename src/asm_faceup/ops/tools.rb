@@ -109,7 +109,6 @@ module ASM_Extensions
         @cursor_screen      = nil
         @current_view       = nil
         @preview_cache      = []
-        @dotted_axis        = nil
         @inference_source   = nil
         @cursor_was_snapped = false
       end
@@ -153,7 +152,6 @@ module ASM_Extensions
         @distance_frozen    = false
         @frozen_point       = nil
         @axis_lock          = nil
-        @dotted_axis        = nil
         @inference_source   = nil
         @cursor_was_snapped = false
         view.invalidate
@@ -205,7 +203,7 @@ module ASM_Extensions
           @anchor_set = true
           Debug.log(self.class, __method__, "Anchor set at #{@anchor_ip.position}")
         else
-          @cursor_ip.pick(view, x, y)
+          pick_cursor(view, x, y)
           @extrusion_distance = compute_pick_distance(@cursor_ip)
           @distance_frozen    = true
           @frozen_point       = effective_cursor_position(view)
@@ -224,7 +222,6 @@ module ASM_Extensions
             @distance_frozen    = false
             @frozen_point       = nil
             @axis_lock          = nil
-            @dotted_axis        = nil
             @inference_source   = nil
             @cursor_was_snapped = false
             @anchor_ip          = Sketchup::InputPoint.new
@@ -253,20 +250,16 @@ module ASM_Extensions
       def onMouseMove(flags, x, y, view)
         @cursor_screen = Geom::Point3d.new(x, y, 0)
         @current_view  = view
-        @cursor_ip.pick(view, x, y)
+        pick_cursor(view, x, y)
 
         was_snapped = @cursor_was_snapped
         @cursor_was_snapped = snapped?(@cursor_ip)
 
         if @cursor_was_snapped
           @inference_source = @cursor_ip.position.clone
-          @dotted_axis      = nil
-        elsif was_snapped
-          @dotted_axis = nil
-        elsif !@cursor_ip.valid?
+        elsif !was_snapped && !@cursor_ip.valid?
           # Cursor completely lost — inference broken, like SketchUp native behavior.
           @inference_source = nil
-          @dotted_axis      = nil
         end
 
         if @anchor_set && !@distance_frozen
@@ -300,6 +293,17 @@ module ASM_Extensions
       end
 
       private
+
+      # Picks the cursor input point. Once the anchor is set, the anchor is
+      # passed as the inference reference so SketchUp offers native from-point
+      # axis inferences (with magnetism) instead of context-free ones.
+      def pick_cursor(view, x, y)
+        if @anchor_set
+          @cursor_ip.pick(view, x, y, @anchor_ip)
+        else
+          @cursor_ip.pick(view, x, y)
+        end
+      end
 
       def update_status_text
         dir = @flip_direction ? Lang.t(:tools, :extruder, :status_flipped) : ""
@@ -465,7 +469,6 @@ module ASM_Extensions
         @distance_frozen    = false
         @frozen_point       = nil
         @axis_lock          = nil
-        @dotted_axis        = nil
         @inference_source   = nil
         @cursor_was_snapped = false
         @flip_direction     = false
@@ -518,62 +521,26 @@ module ASM_Extensions
 
       CIRCLE_SEGMENTS = 16
 
-      # Minimum pixel separation between cursor_pos and display_pos (the snapped point)
-      # before axis color and jump activate. Both must be visible simultaneously.
-      MIN_JUMP_PIXELS = 8
-
       def draw_pick_guide(view)
         return unless @cursor_screen
-
-        jump_visible = false  # hoisted — also used in cursor-dot section below
 
         # Lines first, points on top
         if @anchor_ip.valid?
           cursor_pos = effective_cursor_position(view)
+          s1 = view.screen_coords(@anchor_ip.position)
+          s2 = view.screen_coords(cursor_pos)
+
           if @axis_lock
-            s1 = view.screen_coords(@anchor_ip.position)
-            s2 = view.screen_coords(cursor_pos)
             view.line_width    = 2
             view.drawing_color = AXIS_COLORS[@axis_lock]
-            view.draw2d(GL_LINES,
-              Geom::Point3d.new(s1.x, s1.y, 0),
-              Geom::Point3d.new(s2.x, s2.y, 0))
-            view.line_width = 1
           else
-            unless snapped?(@cursor_ip)
-              from = @inference_source || @anchor_ip.position
-              update_dotted_axis(from, cursor_pos)
-            end
-
-            # Project display_pos onto the detected axis (jump).
-            display_pos = if @dotted_axis
-              base     = @inference_source || @anchor_ip.position
-              axis_vec = AXIS_VECTORS[@dotted_axis]
-              base.offset(axis_vec, (cursor_pos - base).dot(axis_vec))
-            else
-              cursor_pos
-            end
-
-            # Only apply axis color when the jump is visually significant —
-            # i.e. display_pos and cursor_pos differ enough on screen.
-            # This prevents premature coloring before the snap is perceptible.
-            jump_visible = if @dotted_axis && @cursor_screen
-              s_cur  = view.screen_coords(cursor_pos)
-              s_disp = view.screen_coords(display_pos)
-              dx = s_cur.x - s_disp.x
-              dy = s_cur.y - s_disp.y
-              Math.sqrt(dx * dx + dy * dy) >= MIN_JUMP_PIXELS
-            else
-              false
-            end
-
-            s1 = view.screen_coords(@anchor_ip.position)
-            s2 = view.screen_coords(display_pos)
-            view.drawing_color = jump_visible ? axis_color_for_line(@anchor_ip.position, display_pos) : ORANGE
-            view.draw2d(GL_LINES,
-              Geom::Point3d.new(s1.x, s1.y, 0),
-              Geom::Point3d.new(s2.x, s2.y, 0))
+            view.line_width    = 1
+            view.drawing_color = ORANGE
           end
+          view.draw2d(GL_LINES,
+            Geom::Point3d.new(s1.x, s1.y, 0),
+            Geom::Point3d.new(s2.x, s2.y, 0))
+          view.line_width = 1
 
           draw_frozen_marker(view, @frozen_point, @anchor_ip.position) if @frozen_point
 
@@ -589,43 +556,29 @@ module ASM_Extensions
           cursor_pos   = effective_cursor_position(view)
           snap_differs = @axis_lock && @cursor_ip.position != cursor_pos
 
-          # When soft axis snap is active and the jump is visible, show cursor
-          # at the projected position. Otherwise stay at cursor_pos.
-          display_pos = if jump_visible && !@axis_lock && !snapped?(@cursor_ip)
-            base = @inference_source || (@anchor_ip.valid? ? @anchor_ip.position : cursor_pos)
-            axis_vec = AXIS_VECTORS[@dotted_axis]
-            base.offset(axis_vec, (cursor_pos - base).dot(axis_vec))
-          else
-            cursor_pos
-          end
-
-          # Dotted reference line: visible when the cursor is aligned with a principal
-          # axis from the reference point (@dotted_axis active). Not in arbitrary directions.
-          if @inference_source && @dotted_axis && !@axis_lock && !snapped?(@cursor_ip)
+          # Correspondence line: a dotted line from the last snapped reference
+          # point to the cursor — shown only while that segment runs parallel to
+          # a principal axis on screen. A pure visual cue; no snapping applied.
+          if @inference_source && !@axis_lock && !snapped?(@cursor_ip) &&
+             screen_axis_for_line(view, @inference_source, cursor_pos)
             view.line_stipple = '.'
-            view.drawing_color = AXIS_COLORS[@dotted_axis]
-            view.draw(GL_LINES, @inference_source, display_pos)
+            view.drawing_color = INFERENCE_COLORS[:none]
+            view.draw(GL_LINES, @inference_source, cursor_pos)
             view.line_stipple = ''
             draw_inference_circle(view, @inference_source, INFERENCE_COLORS[:none])
           end
 
           if snap_differs
-            draw_inference_circle(view, display_pos, INFERENCE_COLORS[:none])
+            draw_inference_circle(view, cursor_pos, INFERENCE_COLORS[:none])
             view.line_stipple = '.'
             view.drawing_color = INFERENCE_COLORS[:none]
-            view.draw(GL_LINES, @cursor_ip.position, display_pos)
+            view.draw(GL_LINES, @cursor_ip.position, cursor_pos)
             view.line_stipple = ''
             draw_inference_marker(view, @cursor_ip.position, @cursor_ip)
           elsif snapped?(@cursor_ip)
-            draw_inference_marker(view, display_pos, @cursor_ip)
-          elsif jump_visible
-            draw_inference_circle(view, display_pos, INFERENCE_COLORS[:none])
-          elsif !@inference_source
-            # Free point with no reference — only show dot if axis snap is active
-            draw_inference_circle(view, display_pos, INFERENCE_COLORS[:none]) if @dotted_axis
+            draw_inference_marker(view, cursor_pos, @cursor_ip)
           end
         else
-          @dotted_axis = nil
           view.drawing_color = INFERENCE_COLORS[:none]
           view.draw2d(GL_POLYGON, circle_pts(@cursor_screen.x, @cursor_screen.y))
         end
@@ -696,62 +649,39 @@ module ASM_Extensions
         ip.vertex || ip.edge || ip.face
       end
 
-      # Returns the axis color if the line from → to aligns within DOTTED_SNAP_DEG
-      # of a global axis; otherwise returns ORANGE (or the block result if given).
-      def axis_color_for_line(from, to)
-        vec = to - from
-        if vec.length > 1e-10
-          best_axis = nil
-          best_deg  = nil
-          AXIS_VECTORS.each do |axis, axis_vec|
-            deg = (vec.angle_between(axis_vec) * 180.0 / Math::PI)
-            deg = 180.0 - deg if deg > 90.0
-            if best_deg.nil? || deg < best_deg
-              best_axis = axis
-              best_deg  = deg
-            end
-          end
-          return AXIS_COLORS[best_axis] if best_deg && best_deg <= DOTTED_SNAP_DEG
-        end
-        block_given? ? yield : ORANGE
-      end
+      SCREEN_AXIS_DEG = 3.0  # max screen-space deviation to read a line as axis-parallel
+      MIN_LINE_PIXELS = 24   # dead zone around the reference point before the line appears
 
-      DOTTED_SNAP_DEG    = 4.0  # degrees from axis to enter snap
-      DOTTED_RELEASE_DEG = 7.0  # degrees from axis to exit snap (wider → stable hysteresis)
+      # Whether the from→to segment runs parallel to a principal axis as projected
+      # on screen. Screen-space (camera-dependent), so it is evaluated per draw
+      # frame. Returns the matched axis (:x/:y/:z) or nil. Pure — writes no state.
+      def screen_axis_for_line(view, from, to)
+        s_from = view.screen_coords(from)
+        s_to   = view.screen_coords(to)
+        ldx = s_to.x - s_from.x
+        ldy = s_to.y - s_from.y
+        # Suppress near the reference: a short segment has an unstable direction
+        # that matches an axis by chance. This is the "gap" before the line shows.
+        return nil if (ldx * ldx + ldy * ldy) < MIN_LINE_PIXELS * MIN_LINE_PIXELS
 
-      def update_dotted_axis(from, to)
-        vec = to - from
-        return if vec.length < 1e-10
-
-        # Find the axis whose direction is closest to vec (parallel or anti-parallel)
+        line_ang  = Math.atan2(ldy, ldx)
         best_axis = nil
         best_deg  = nil
-
         AXIS_VECTORS.each do |axis, axis_vec|
-          angle_rad = vec.angle_between(axis_vec)
-          # Map to [0, 90] — both parallel (0°) and anti-parallel (180°) count
-          deg = (angle_rad * 180.0 / Math::PI)
-          deg = 180.0 - deg if deg > 90.0
+          s_axis = view.screen_coords(from.offset(axis_vec, 1))
+          adx = s_axis.x - s_from.x
+          ady = s_axis.y - s_from.y
+          next if (adx * adx + ady * ady) < 1e-9  # axis projects edge-on to the camera
 
+          deg = ((line_ang - Math.atan2(ady, adx)) * 180.0 / Math::PI).abs % 180.0
+          deg = 180.0 - deg if deg > 90.0
           if best_deg.nil? || deg < best_deg
             best_axis = axis
             best_deg  = deg
           end
         end
-
-        # Hysteresis: measure against the currently snapped axis to release it
-        if @dotted_axis
-          current_vec = AXIS_VECTORS[@dotted_axis]
-          angle_rad   = vec.angle_between(current_vec)
-          current_deg = (angle_rad * 180.0 / Math::PI)
-          current_deg = 180.0 - current_deg if current_deg > 90.0
-
-          @dotted_axis = nil if current_deg > DOTTED_RELEASE_DEG
-        end
-
-        @dotted_axis = best_axis if @dotted_axis.nil? && best_deg <= DOTTED_SNAP_DEG
+        (best_deg && best_deg <= SCREEN_AXIS_DEG) ? best_axis : nil
       end
-
 
       def toggle_axis_lock(axis, view)
         return unless @anchor_set
