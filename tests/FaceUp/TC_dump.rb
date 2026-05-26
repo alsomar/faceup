@@ -12,7 +12,12 @@ module ASM_Extensions
         Sketchup.require 'asm_faceup/lang/i18n'
         Sketchup.require 'asm_faceup/lang/locales/en_us'
         Sketchup.require 'asm_faceup/lang/locales/es_es'
+        @original_locale = Lang.locale
         Lang.configure("en-US")
+      end
+
+      def teardown
+        Lang.configure(@original_locale)
       end
 
       # --- Return type ---
