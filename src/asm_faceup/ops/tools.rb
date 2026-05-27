@@ -83,6 +83,74 @@ module ASM_Extensions
       selection.add(presel_edges)
     end
 
+    ### MIN-AREA BOUNDING RECTANGLE (2D) ### --------------------------------------
+    # Pure helpers for the Extruder's optional min-volume axis alignment. Kept
+    # free of SketchUp model state so they can be unit-tested with plain arrays.
+
+    # Andrew's monotone-chain convex hull. pts: [[x, y], ...]. Returns the hull
+    # vertices counter-clockwise, with no repeated endpoint.
+    def self.convex_hull_2d(pts)
+      pts = pts.uniq.sort_by { |p| [p[0], p[1]] }
+      return pts if pts.length < 3
+
+      cross = lambda do |o, a, b|
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+      end
+
+      lower = []
+      pts.each do |p|
+        lower.pop while lower.length >= 2 && cross.call(lower[-2], lower[-1], p) <= 0
+        lower << p
+      end
+
+      upper = []
+      pts.reverse_each do |p|
+        upper.pop while upper.length >= 2 && cross.call(upper[-2], upper[-1], p) <= 0
+        upper << p
+      end
+
+      lower[0...-1] + upper[0...-1]
+    end
+
+    # Rotation angle (radians) of the minimum-area bounding rectangle of a 2D
+    # point set. By O'Rourke the optimum has a side flush with a hull edge, so
+    # only hull-edge directions are evaluated. Rotating points by -angle then
+    # axis-aligns that rectangle.
+    def self.min_area_rect_angle(pts2d)
+      hull = convex_hull_2d(pts2d)
+      return 0.0 if hull.length < 2
+
+      best_angle = 0.0
+      best_area  = nil
+      n = hull.length
+
+      n.times do |i|
+        a = hull[i]
+        b = hull[(i + 1) % n]
+        theta = Math.atan2(b[1] - a[1], b[0] - a[0])
+        cos_t = Math.cos(theta)
+        sin_t = Math.sin(theta)
+
+        min_u = max_u = min_v = max_v = nil
+        hull.each do |p|
+          u =  p[0] * cos_t + p[1] * sin_t
+          v = -p[0] * sin_t + p[1] * cos_t
+          min_u = u if min_u.nil? || u < min_u
+          max_u = u if max_u.nil? || u > max_u
+          min_v = v if min_v.nil? || v < min_v
+          max_v = v if max_v.nil? || v > max_v
+        end
+
+        area = (max_u - min_u) * (max_v - min_v)
+        if best_area.nil? || area < best_area
+          best_area  = area
+          best_angle = theta
+        end
+      end
+
+      best_angle
+    end
+
     ### EXTRUDER TOOL ### ---------------------------------------------------------
 
     class ExtruderTool
@@ -450,6 +518,7 @@ module ASM_Extensions
 
       def xtrd_groups(groups, height)
         default_layer = Sketchup.active_model.layers[0]
+        align         = CONFIG[:align_to_min_bb]
 
         groups.each do |group|
           entities = group.entities.to_a
@@ -458,8 +527,50 @@ module ASM_Extensions
           faces.each                         { |f| f.layer = default_layer }
           entities.grep(Sketchup::Edge).each { |e| e.layer = default_layer }
 
-          faces.first.pushpull(height) if faces.first
+          next unless faces.first
+
+          # The profile normal (before pushpull) is the extrusion axis.
+          normal = faces.first.normal
+          faces.first.pushpull(height)
+          apply_min_bb_alignment(group, normal) if align
         end
+      end
+
+      # Redefines the group's local axes so its bounding box is the minimum-volume
+      # OBB with the extrusion axis on local Z. World geometry is unchanged: the
+      # definition is rotated by R and the group transform set to T0 * R⁻¹.
+      def apply_min_bb_alignment(group, normal)
+        n = normal
+        return if n.length < 1e-9
+        n = n.normalize
+
+        e1, e2, _ = n.axes  # arbitrary orthonormal basis spanning the plane ⊥ n
+        defn = group.definition
+
+        pts2d = []
+        defn.entities.grep(Sketchup::Edge).each do |edge|
+          [edge.start.position, edge.end.position].each do |p|
+            pts2d << [p.x * e1.x + p.y * e1.y + p.z * e1.z,
+                      p.x * e2.x + p.y * e2.y + p.z * e2.z]
+          end
+        end
+        return if pts2d.length < 2
+
+        theta  = ASM_Extensions::FaceUp.min_area_rect_angle(pts2d)
+        u      = Geom::Vector3d.linear_combination(Math.cos(theta), e1, Math.sin(theta), e2)
+        v      = n.cross(u)            # n × u → right-handed (no mirror)
+        origin = Geom::Point3d.new(0, 0, 0)
+        frame  = Geom::Transformation.axes(origin, u, v, n)
+
+        # Skip the geometry op when the box is already optimally oriented.
+        m     = frame.to_a
+        trace = m[0] + m[5] + m[10]
+        angle = Math.acos([[(trace - 1.0) / 2.0, -1.0].max, 1.0].min)
+        return if angle < 1e-4
+
+        t0 = group.transformation
+        defn.entities.transform_entities(frame.inverse, defn.entities.to_a)
+        group.transformation = t0 * frame
       end
 
       def reset_tool

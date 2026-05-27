@@ -177,6 +177,12 @@
                       </div>
                     </div>
 
+                    <!-- Auto-orient bounding box -->
+                    <div class="custom-control custom-switch mt-2">
+                      <input type="checkbox" class="custom-control-input" v-model="settingsAlignBoundingBox" id="settingsAlignBoundingBox">
+                      <label class="custom-control-label" for="settingsAlignBoundingBox">{{ t('html.settings.align_to_min_bb') }}</label>
+                    </div>
+
                   </div>
                 </div>
               </div>
@@ -333,6 +339,7 @@
           settingsUseLastExtrusion:     true,
           settingsDefaultExtrusion:     '0',
           settingsDefaultExtrusionUnit: 'model',
+          settingsAlignBoundingBox:     false,
 
           // General Options
           settingsLanguage:    'auto',
@@ -404,6 +411,7 @@
             use_last_extrusion:       this.settingsUseLastExtrusion,
             default_extrusion:        this.settingsDefaultExtrusion,
             default_extrusion_unit:   this.settingsDefaultExtrusionUnit,
+            align_to_min_bb:          this.settingsAlignBoundingBox,
             language:            this.settingsLanguage,
             context_menu:        this.settingsContextMenu,
             dark_mode:           this.darkMode,
@@ -433,6 +441,7 @@
           this.settingsUseLastExtrusion     = true;
           this.settingsDefaultExtrusion     = '0';
           this.settingsDefaultExtrusionUnit = 'model';
+          this.settingsAlignBoundingBox     = false;
           this.settingsLanguage           = 'auto';
           this.settingsContextMenu        = false;
           this.darkMode                   = false;

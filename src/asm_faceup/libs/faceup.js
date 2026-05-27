@@ -5,4 +5,5 @@ window.onExtensionSettings = function(config) {
   window.app.settingsUseLastExtrusion     = config.use_last_extrusion;
   window.app.settingsDefaultExtrusion     = String(config.default_extrusion != null ? config.default_extrusion : '0');
   window.app.settingsDefaultExtrusionUnit = config.default_extrusion_unit || 'model';
+  window.app.settingsAlignBoundingBox     = !!config.align_to_min_bb;
 };

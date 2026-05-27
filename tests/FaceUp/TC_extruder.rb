@@ -201,6 +201,52 @@ module ASM_Extensions
                      @tool.send(:inference_color, ip)
       end
 
+      # ── convex_hull_2d ────────────────────────────────────────────────────
+
+      def test_convex_hull_2d_drops_interior_point
+        pts = [[0, 0], [2, 0], [2, 2], [0, 2], [1, 1]]
+        hull = ASM_Extensions::FaceUp.convex_hull_2d(pts)
+        assert_equal 4, hull.length
+        assert(hull.none? { |p| p == [1, 1] }, "interior point should be dropped")
+      end
+
+      def test_convex_hull_2d_collinear_points_collapse
+        pts = [[0, 0], [1, 0], [2, 0], [2, 2], [0, 2]]
+        hull = ASM_Extensions::FaceUp.convex_hull_2d(pts)
+        # The collinear (1,0) on the bottom edge must not be a hull vertex.
+        assert_equal 4, hull.length
+      end
+
+      # ── min_area_rect_angle ───────────────────────────────────────────────
+
+      # Area of the bounding box after rotating the points by `theta`,
+      # using the same projection convention as min_area_rect_angle.
+      def bb_area_at(pts, theta)
+        c = Math.cos(theta)
+        s = Math.sin(theta)
+        us = pts.map { |p|  p[0] * c + p[1] * s }
+        vs = pts.map { |p| -p[0] * s + p[1] * c }
+        (us.max - us.min) * (vs.max - vs.min)
+      end
+
+      def test_min_area_rect_angle_axis_aligned_rect_is_multiple_of_90
+        pts   = [[0, 0], [3, 0], [3, 1], [0, 1]]
+        angle = ASM_Extensions::FaceUp.min_area_rect_angle(pts)
+        # Already optimal: angle must be a multiple of 90° (BB area has period π/2).
+        norm = angle % (Math::PI / 2.0)
+        norm = (Math::PI / 2.0) - norm if norm > Math::PI / 4.0
+        assert_in_delta 0.0, norm, 1e-6
+      end
+
+      def test_min_area_rect_angle_beats_axis_aligned_for_diamond
+        # Square rotated 45°: min-area rect runs along its 45° edges, not the axes.
+        pts   = [[0, 1], [1, 0], [0, -1], [-1, 0]]
+        angle = ASM_Extensions::FaceUp.min_area_rect_angle(pts)
+        assert_operator bb_area_at(pts, angle), :<=, bb_area_at(pts, 0.0) + 1e-9
+        # The diamond's min area is 2.0 (side √2), vs 4.0 axis-aligned.
+        assert_in_delta 2.0, bb_area_at(pts, angle), 1e-6
+      end
+
     end
   end
 end

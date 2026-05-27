@@ -45,6 +45,7 @@ module ASM_Extensions
               unit_m:                 "Metros",
               unit_inch:              "Pulgadas",
               unit_feet:              "Pies",
+              align_to_min_bb:        "Auto-orientar caja envolvente",
               general_options:        "Opciones generales",
               language_selection: "Selección de idioma",
               language_hint:      "Puede ser necesario reiniciar SketchUp para aplicar los ajustes de idioma.",

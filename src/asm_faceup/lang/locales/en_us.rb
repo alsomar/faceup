@@ -45,6 +45,7 @@ module ASM_Extensions
               unit_m:                 "Meters",
               unit_inch:              "Inches",
               unit_feet:              "Feet",
+              align_to_min_bb:        "Auto-orient bounding box",
               general_options:        "General Options",
               language_selection: "Language selection",
               language_hint:      "You may need to restart SketchUp to update the language settings.",
