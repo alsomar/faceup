@@ -297,8 +297,15 @@ body.dark-mode .asav-text-muted {
 .asav-disabled {
   cursor: not-allowed;
 }
-.asav-disabled label {
-  color: #d8d8d8;
+/* Plain <label>s mute to the deep recessed tone. We exclude
+   .custom-control-label on purpose: switches / checkboxes / radios
+   already get Modus' own disabled cascade
+   (.custom-control-input[disabled]~.custom-control-label → #595868)
+   plus a greyed track + handle, and stacking #d8d8d8 on top makes the
+   whole row read too pale next to the more substantial inline-field
+   disabled palette. Modus' own muted is enough for those. */
+.asav-disabled label:not(.custom-control-label) {
+  color: #d8d8d8 !important;
 }
 .asav-disabled .btn:disabled,
 .asav-disabled .btn:disabled:hover {
@@ -308,8 +315,8 @@ body.dark-mode .asav-text-muted {
   opacity: 1;            /* override Modus' default :disabled fade */
   cursor: not-allowed;
 }
-body.dark-mode .asav-disabled label {
-  color: #3a3a5a;
+body.dark-mode .asav-disabled label:not(.custom-control-label) {
+  color: #3a3a5a !important;
 }
 body.dark-mode .asav-disabled .btn:disabled,
 body.dark-mode .asav-disabled .btn:disabled:hover {
