@@ -15,6 +15,10 @@
   <script src="../libs/faceup.js"></script>
 </head>
 <body>
+  <!-- FOUC-prevention: apply the cross-extension dark mode before Vue mounts.
+       Key is shared across asav.* dialogs by design — see asav.js for the
+       full sync (Vue hydration prefers this value, storage event listener
+       keeps open dialogs in sync when another extension toggles). -->
   <script>if (localStorage.getItem('asav_dark_mode') === 'true') document.body.classList.add('dark-mode');</script>
   <div class="asav-root">
     <div id="app" class="modus-layout" v-cloak v-show="appReady">
