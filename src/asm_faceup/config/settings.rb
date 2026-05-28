@@ -17,7 +17,6 @@ module ASM_Extensions
       # Extruder Options
       use_last_extrusion:      true,
       default_extrusion:       0,
-      default_extrusion_unit:  "model",
       align_to_min_bb:         false,
 
       # Inner Options

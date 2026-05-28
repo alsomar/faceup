@@ -69,6 +69,10 @@ module ASM_Extensions
         assert_equal "'", ExtruderTool::UNIT_SUFFIXES['feet']
       end
 
+      def test_unit_suffixes_yard
+        assert_equal 'yd', ExtruderTool::UNIT_SUFFIXES['yard']
+      end
+
       def test_unit_suffixes_model_is_nil
         assert_nil ExtruderTool::UNIT_SUFFIXES['model']
       end
@@ -102,6 +106,11 @@ module ASM_Extensions
       def test_default_extrusion_feet_returns_length
         result = @tool.send(:default_extrusion_to_length, 6, 'feet')
         assert_equal "6'".to_l, result
+      end
+
+      def test_default_extrusion_yard_returns_length
+        result = @tool.send(:default_extrusion_to_length, 3, 'yard')
+        assert_equal '3yd'.to_l, result
       end
 
       def test_default_extrusion_model_units_returns_length

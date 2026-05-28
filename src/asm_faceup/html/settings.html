@@ -6,6 +6,7 @@
   <link href="../vendor/modus/modus-layout.min.css" rel="stylesheet">
   <link href="../vendor/modus/modus-icons.css" rel="stylesheet">
   <link href="../libs/asav.css" rel="stylesheet">
+  <link href="../libs/faceup.css" rel="stylesheet">
   <script src="../vendor/modus/jquery.js"></script>
   <script src="../vendor/modus/bootstrap.bundle.min.js"></script>
   <script src="../vendor/vue.min.js"></script>
@@ -148,39 +149,49 @@
                   aria-labelledby="accordionTab3" data-parent="#accordionSettings">
                   <div class="card-body card-custom">
 
+                    <!-- Auto-orient bounding box -->
+                    <div class="custom-control custom-switch">
+                      <input type="checkbox" class="custom-control-input" v-model="settingsAlignBoundingBox" id="settingsAlignBoundingBox">
+                      <label class="custom-control-label" for="settingsAlignBoundingBox">{{ t('html.settings.align_to_min_bb') }}</label>
+                    </div>
+
                     <!-- Use Last Extrusion -->
                     <div class="custom-control custom-switch">
                       <input type="checkbox" class="custom-control-input" v-model="settingsUseLastExtrusion" id="settingsUseLastExtrusion">
                       <label class="custom-control-label" for="settingsUseLastExtrusion">{{ t('html.settings.use_last_extrusion') }}</label>
                     </div>
 
-                    <!-- Default Extrusion Value -->
-                    <div class="mt-2">
-                      <label for="settingsDefaultExtrusion" :class="settingsUseLastExtrusion ? 'text-muted' : ''">
+                    <!-- Default Extrusion Value — value with the model unit inside -->
+                    <div class="mt-1 asav-inline-field" :class="{ 'asav-disabled': settingsUseLastExtrusion }">
+                      <label for="settingsDefaultExtrusion" class="asav-inline-label">
+                        <a href="#" class="asav-reset-leading"
+                          :class="{ 'is-disabled': extrusionIsDefault() }"
+                          data-toggle="tooltip" data-placement="top" data-container="body" data-boundary="window"
+                          :data-original-title="t('html.settings.reset_value')"
+                          @click.stop.prevent="resetExtrusion($event)">
+                          <i class="modus-icons" aria-hidden="true">refresh</i>
+                        </a>
                         {{ t('html.settings.default_extrusion') }}
                       </label>
-                      <div class="input-group">
-                        <input type="number" min="0" step="any" class="form-control" id="settingsDefaultExtrusion"
-                          v-model="settingsDefaultExtrusion"
-                          :disabled="settingsUseLastExtrusion">
-                        <div class="input-group-append">
-                          <select class="custom-select" v-model="settingsDefaultExtrusionUnit"
+                      <div class="asav-scroll-row">
+                        <label class="asav-input-suffix" :data-suffix="settingsModelUnit">
+                          <input type="number" min="0" step="any" id="settingsDefaultExtrusion"
+                            v-model="settingsDefaultExtrusion"
                             :disabled="settingsUseLastExtrusion">
-                            <option value="model">{{ t('html.settings.unit_model') }}</option>
-                            <option value="mm">{{ t('html.settings.unit_mm') }}</option>
-                            <option value="cm">{{ t('html.settings.unit_cm') }}</option>
-                            <option value="m">{{ t('html.settings.unit_m') }}</option>
-                            <option value="inch">{{ t('html.settings.unit_inch') }}</option>
-                            <option value="feet">{{ t('html.settings.unit_feet') }}</option>
-                          </select>
-                        </div>
+                        </label>
+                        <button type="button" class="btn btn-outline-secondary btn-sm asav-step-btn"
+                          :disabled="settingsUseLastExtrusion"
+                          @pointerdown.prevent="startStep(-1)" @pointerup="stopStep"
+                          @pointerleave="stopStep" @pointercancel="stopStep">
+                          <i class="modus-icons" aria-hidden="true">caret_left</i>
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm asav-step-btn"
+                          :disabled="settingsUseLastExtrusion"
+                          @pointerdown.prevent="startStep(1)" @pointerup="stopStep"
+                          @pointerleave="stopStep" @pointercancel="stopStep">
+                          <i class="modus-icons" aria-hidden="true">caret_right</i>
+                        </button>
                       </div>
-                    </div>
-
-                    <!-- Auto-orient bounding box -->
-                    <div class="custom-control custom-switch mt-2">
-                      <input type="checkbox" class="custom-control-input" v-model="settingsAlignBoundingBox" id="settingsAlignBoundingBox">
-                      <label class="custom-control-label" for="settingsAlignBoundingBox">{{ t('html.settings.align_to_min_bb') }}</label>
                     </div>
 
                   </div>
@@ -338,7 +349,7 @@
           // Extruder Options
           settingsUseLastExtrusion:     true,
           settingsDefaultExtrusion:     '0',
-          settingsDefaultExtrusionUnit: 'model',
+          settingsModelUnit:            '',
           settingsAlignBoundingBox:     false,
 
           // General Options
@@ -410,7 +421,6 @@
             settings_test3:      this.settingsTest3,
             use_last_extrusion:       this.settingsUseLastExtrusion,
             default_extrusion:        this.settingsDefaultExtrusion,
-            default_extrusion_unit:   this.settingsDefaultExtrusionUnit,
             align_to_min_bb:          this.settingsAlignBoundingBox,
             language:            this.settingsLanguage,
             context_menu:        this.settingsContextMenu,
@@ -431,6 +441,48 @@
           if (ev && ev.currentTarget) ev.currentTarget.blur();
           this.darkMode = !this.darkMode;
         },
+        stepExtrusion(dir, mult) {
+          if (this.settingsUseLastExtrusion) return;
+          const cur = parseFloat(this.settingsDefaultExtrusion);
+          let v = (isNaN(cur) ? 0 : cur) + dir * (mult || 1);
+          if (v < 0) v = 0;
+          this.settingsDefaultExtrusion = String(Math.round(v * 1000) / 1000);
+        },
+        // Tick -> step multiplier: held-button acceleration like stacks
+        // (constant tick rate, growing step). Breakpoints at 15 / 35 / 55.
+        _scrollMult(tick) {
+          if (tick > 55) return 16;
+          if (tick > 35) return 8;
+          if (tick > 15) return 4;
+          return 1;
+        },
+        startStep(dir) {
+          this.stopStep();
+          this.stepExtrusion(dir, 1);             // immediate click
+          let tick = 0;
+          this._stepHold = setTimeout(() => {     // 0.35s before repeat kicks in
+            this._stepTimer = setInterval(() => { // then a tick every 0.05s
+              tick += 1;
+              this.stepExtrusion(dir, this._scrollMult(tick));
+            }, 50);
+          }, 350);
+        },
+        stopStep() {
+          if (this._stepHold) { clearTimeout(this._stepHold); this._stepHold = null; }
+          if (this._stepTimer) { clearInterval(this._stepTimer); this._stepTimer = null; }
+        },
+        extrusionIsDefault() {
+          const v = parseFloat(this.settingsDefaultExtrusion);
+          return isNaN(v) || v === 0;
+        },
+        resetExtrusion(ev) {
+          if (ev && ev.currentTarget) {
+            $(ev.currentTarget).tooltip('hide');
+            ev.currentTarget.blur();
+          }
+          if (this.settingsUseLastExtrusion) return;
+          this.settingsDefaultExtrusion = '0';
+        },
         resetSettings() {
           $('#resetConfirmModal').modal('hide');
           this._hydrating = true;
@@ -440,7 +492,6 @@
           this.settingsTest3              = false;
           this.settingsUseLastExtrusion     = true;
           this.settingsDefaultExtrusion     = '0';
-          this.settingsDefaultExtrusionUnit = 'model';
           this.settingsAlignBoundingBox     = false;
           this.settingsLanguage           = 'auto';
           this.settingsContextMenu        = false;

@@ -151,6 +151,24 @@ module ASM_Extensions
       best_angle
     end
 
+    ### MODEL UNITS ### -----------------------------------------------------------
+
+    LENGTH_UNIT_INFO = {
+      0 => { key: 'inch', abbr: 'in' },
+      1 => { key: 'feet', abbr: 'ft' },
+      2 => { key: 'mm',   abbr: 'mm' },
+      3 => { key: 'cm',   abbr: 'cm' },
+      4 => { key: 'm',    abbr: 'm'  },
+      5 => { key: 'yard', abbr: 'yd' },
+    }.freeze
+
+    # The active model's length unit as { key:, abbr: }. `key` feeds
+    # default_extrusion_to_length (via UNIT_SUFFIXES); `abbr` is shown in the UI.
+    def self.model_length_unit(model)
+      LENGTH_UNIT_INFO[model.options['UnitsOptions']['LengthUnit']] ||
+        { key: 'model', abbr: '' }
+    end
+
     ### EXTRUDER TOOL ### ---------------------------------------------------------
 
     class ExtruderTool
@@ -158,7 +176,8 @@ module ASM_Extensions
       def initialize
         model = Sketchup.active_model
         @selected_faces     = []
-        default = default_extrusion_to_length(CONFIG[:default_extrusion], CONFIG[:default_extrusion_unit])
+        unit_key = ASM_Extensions::FaceUp.model_length_unit(model)[:key]
+        default = default_extrusion_to_length(CONFIG[:default_extrusion], unit_key)
         @extrusion_distance = if CONFIG[:use_last_extrusion]
           stored = model.get_attribute('ASM_Extensions_FaceUp', 'last_extrusion_distance', nil)
           stored ? stored : default
@@ -846,6 +865,7 @@ module ASM_Extensions
         'm'    => 'm',
         'inch' => '"',
         'feet' => "'",
+        'yard' => 'yd',
         'model' => nil,
       }.freeze
 
