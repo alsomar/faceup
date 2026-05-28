@@ -12,6 +12,7 @@ vendor/bundle/
 .yardopts
 
 # SketchUp
+*.rbz
 *.skb
 AutoSave_*.skp
 Snapshots/

@@ -197,6 +197,7 @@ module ASM_Extensions
         @current_view       = nil
         @preview_cache      = []
         @inference_source   = nil
+        @source_axis_snap   = nil
         @cursor_was_snapped = false
       end
 
@@ -240,6 +241,7 @@ module ASM_Extensions
         @frozen_point       = nil
         @axis_lock          = nil
         @inference_source   = nil
+        @source_axis_snap   = nil
         @cursor_was_snapped = false
         view.invalidate
       end
@@ -310,6 +312,7 @@ module ASM_Extensions
             @frozen_point       = nil
             @axis_lock          = nil
             @inference_source   = nil
+            @source_axis_snap   = nil
             @cursor_was_snapped = false
             @anchor_ip          = Sketchup::InputPoint.new
             update_status_text
@@ -389,6 +392,120 @@ module ASM_Extensions
           @cursor_ip.pick(view, x, y, @anchor_ip)
         else
           @cursor_ip.pick(view, x, y)
+        end
+        update_source_axis_snap(view, x, y)
+      end
+
+      # Decide whether the correspondence to @inference_source should be active
+      # this frame, and if so where the cursor effectively sits.
+      #
+      # The line shows whenever the cursor is *already* aligned with V along a
+      # principal axis (within EXACT_AXIS_DEG) — no pulling needed in that
+      # case, since the orange line keeps whichever direction it had. This is
+      # the parallel-coincident scenario and the on-axis-vertex scenario.
+      #
+      # Otherwise we try a soft pull:
+      # - Post-anchor: only to a double-inference intersection (an anchor-axis
+      #   line crossed with a source-axis line). Keeps the orange line on its
+      #   own principal axis while the correspondence to V is on its own.
+      # - Pre-anchor: free projection onto the closest source axis. Useful for
+      #   landing the anchor on a line from V.
+      def update_source_axis_snap(view, x, y)
+        prior = @source_axis_snap
+        @source_axis_snap = nil
+        return unless @inference_source
+
+        current_pos = cursor_position_pre_source_snap(view)
+        if (axis = exact_v_axis_from(current_pos))
+          @source_axis_snap = { axis: axis, position: current_pos, d2: 0 }
+          return
+        end
+
+        return if snapped?(@cursor_ip)
+
+        fresh =
+          if @anchor_set && @anchor_ip.valid?
+            best_anchor_source_intersection(view, x, y)
+          else
+            best_source_axis_projection(view, x, y)
+          end
+
+        if fresh
+          @source_axis_snap = fresh
+          return
+        end
+
+        # Hysteresis: keep the prior snap alive while within the larger
+        # release radius. Lets the saltito stick once the user has latched on.
+        return unless prior
+        d2 = squared_screen_distance(view, prior[:position], x, y)
+        @source_axis_snap = prior.merge(d2: d2) if d2 <= SOURCE_HOLD_PX * SOURCE_HOLD_PX
+      end
+
+      # Whether (point - @inference_source) is along a principal axis within
+      # EXACT_AXIS_DEG. Returns the axis (:x/:y/:z) or nil.
+      def exact_v_axis_from(point)
+        vec = point - @inference_source
+        return nil if vec.length < 1e-6
+        vec = vec.normalize
+        AXIS_VECTORS.each do |axis, axis_vec|
+          cos_a = vec.dot(axis_vec).abs
+          cos_a = 1.0 if cos_a > 1.0
+          deg = Math.acos(cos_a) * 180.0 / Math::PI
+          return axis if deg <= EXACT_AXIS_DEG
+        end
+        nil
+      end
+
+      def best_anchor_source_intersection(view, x, y)
+        anchor      = @anchor_ip.position
+        anchor_axes = @axis_lock ? [@axis_lock] : AXIS_VECTORS.keys
+        best        = nil
+
+        anchor_axes.each do |anchor_axis|
+          lock_vec = AXIS_VECTORS[anchor_axis]
+          AXIS_VECTORS.each_key do |source_axis|
+            next if source_axis == anchor_axis
+            third = (AXIS_VECTORS.keys - [anchor_axis, source_axis]).first
+            next if (component_of(anchor, third) - component_of(@inference_source, third)).abs > 1e-3
+
+            t   = (@inference_source - anchor).dot(lock_vec)
+            pos = anchor.offset(lock_vec, t)
+            d2  = squared_screen_distance(view, pos, x, y)
+            if d2 <= SOURCE_SNAP_PX * SOURCE_SNAP_PX && (best.nil? || d2 < best[:d2])
+              best = { axis: source_axis, position: pos, d2: d2 }
+            end
+          end
+        end
+        best
+      end
+
+      def best_source_axis_projection(view, x, y)
+        ray  = view.pickray(x, y)
+        best = nil
+        AXIS_VECTORS.each do |axis, axis_vec|
+          t   = closest_point_on_axis(@inference_source, axis_vec, ray[0], ray[1])
+          pos = @inference_source.offset(axis_vec, t)
+          d2  = squared_screen_distance(view, pos, x, y)
+          if d2 <= SOURCE_SNAP_PX * SOURCE_SNAP_PX && (best.nil? || d2 < best[:d2])
+            best = { axis: axis, position: pos, d2: d2 }
+          end
+        end
+        best
+      end
+
+      def squared_screen_distance(view, point_3d, x, y)
+        s = view.screen_coords(point_3d)
+        dx = s.x - x
+        dy = s.y - y
+        dx * dx + dy * dy
+      end
+
+      def component_of(point, axis)
+        case axis
+        when :x then point.x
+        when :y then point.y
+        when :z then point.z
         end
       end
 
@@ -600,6 +717,7 @@ module ASM_Extensions
         @frozen_point       = nil
         @axis_lock          = nil
         @inference_source   = nil
+        @source_axis_snap   = nil
         @cursor_was_snapped = false
         @flip_direction     = false
         @operation_open     = false
@@ -681,16 +799,22 @@ module ASM_Extensions
           end
         end
 
-        # Cursor marker — projected point on the locked axis (or raw screen if no snap)
+        # Cursor marker — projected point on the locked axis / source snap
+        # (or raw screen if no snap).
         if @cursor_ip.valid?
-          cursor_pos   = effective_cursor_position(view)
-          snap_differs = @axis_lock && @cursor_ip.position != cursor_pos
+          cursor_pos         = effective_cursor_position(view)
+          position_overridden = (@axis_lock || @source_axis_snap) && @cursor_ip.position != cursor_pos
 
           # Correspondence line: a dotted line from the last snapped reference
-          # point to the cursor — shown only while that segment runs parallel to
-          # a principal axis on screen. A pure visual cue; no snapping applied.
-          if @inference_source && !@axis_lock && !snapped?(@cursor_ip) &&
-             screen_axis_for_line(view, @inference_source, cursor_pos)
+          # point to the cursor. Shown only when the cursor is genuinely on a
+          # source axis — either pulled there by the soft snap, or because it
+          # snapped to geometry that happens to lie on the axis. Without the
+          # snap gate, the 3° tolerance corridor of axis_for_line let an
+          # oblique line appear before the soft snap engaged.
+          if @inference_source && !@axis_lock && (
+               @source_axis_snap ||
+               (snapped?(@cursor_ip) && axis_for_line(view, @inference_source, cursor_pos))
+             )
             view.line_stipple = '.'
             view.drawing_color = INFERENCE_COLORS[:none]
             view.draw(GL_LINES, @inference_source, cursor_pos)
@@ -698,13 +822,13 @@ module ASM_Extensions
             draw_inference_circle(view, @inference_source, INFERENCE_COLORS[:none])
           end
 
-          if snap_differs
+          if position_overridden
             draw_inference_circle(view, cursor_pos, INFERENCE_COLORS[:none])
             view.line_stipple = '.'
             view.drawing_color = INFERENCE_COLORS[:none]
             view.draw(GL_LINES, @cursor_ip.position, cursor_pos)
             view.line_stipple = ''
-            draw_inference_marker(view, @cursor_ip.position, @cursor_ip)
+            draw_inference_marker(view, @cursor_ip.position, @cursor_ip) if snapped?(@cursor_ip)
           elsif snapped?(@cursor_ip)
             draw_inference_marker(view, cursor_pos, @cursor_ip)
           end
@@ -779,38 +903,39 @@ module ASM_Extensions
         ip.vertex || ip.edge || ip.face
       end
 
-      SCREEN_AXIS_DEG = 3.0  # max screen-space deviation to read a line as axis-parallel
-      MIN_LINE_PIXELS = 24   # dead zone around the reference point before the line appears
+      AXIS_PARALLEL_DEG = 3.0  # max 3D angular deviation to read a segment as axis-parallel
+      EXACT_AXIS_DEG    = 0.5  # tight tolerance for "cursor sits on a V axis already"
+      MIN_LINE_PIXELS   = 24   # screen dead zone around the reference point before the line shows
+      SOURCE_SNAP_PX    = 18   # magnetic radius to engage soft snap to a V axis
+      SOURCE_HOLD_PX    = 32   # hysteresis: keep an engaged snap until cursor escapes this radius
 
-      # Whether the from→to segment runs parallel to a principal axis as projected
-      # on screen. Screen-space (camera-dependent), so it is evaluated per draw
-      # frame. Returns the matched axis (:x/:y/:z) or nil. Pure — writes no state.
-      def screen_axis_for_line(view, from, to)
+      # Whether the from→to 3D segment is parallel to a principal axis within
+      # AXIS_PARALLEL_DEG. Returns the matched axis (:x/:y/:z) or nil. Pure —
+      # writes no state. The camera is consulted only for the screen deadzone
+      # so a tiny on-screen line near the reference doesn't flicker.
+      def axis_for_line(view, from, to)
         s_from = view.screen_coords(from)
         s_to   = view.screen_coords(to)
         ldx = s_to.x - s_from.x
         ldy = s_to.y - s_from.y
-        # Suppress near the reference: a short segment has an unstable direction
-        # that matches an axis by chance. This is the "gap" before the line shows.
         return nil if (ldx * ldx + ldy * ldy) < MIN_LINE_PIXELS * MIN_LINE_PIXELS
 
-        line_ang  = Math.atan2(ldy, ldx)
+        vec = to - from
+        return nil if vec.length < 1e-6
+        vec = vec.normalize
+
         best_axis = nil
         best_deg  = nil
         AXIS_VECTORS.each do |axis, axis_vec|
-          s_axis = view.screen_coords(from.offset(axis_vec, 1))
-          adx = s_axis.x - s_from.x
-          ady = s_axis.y - s_from.y
-          next if (adx * adx + ady * ady) < 1e-9  # axis projects edge-on to the camera
-
-          deg = ((line_ang - Math.atan2(ady, adx)) * 180.0 / Math::PI).abs % 180.0
-          deg = 180.0 - deg if deg > 90.0
+          cos_a = vec.dot(axis_vec).abs
+          cos_a = 1.0 if cos_a > 1.0
+          deg = Math.acos(cos_a) * 180.0 / Math::PI
           if best_deg.nil? || deg < best_deg
             best_axis = axis
             best_deg  = deg
           end
         end
-        (best_deg && best_deg <= SCREEN_AXIS_DEG) ? best_axis : nil
+        (best_deg && best_deg <= AXIS_PARALLEL_DEG) ? best_axis : nil
       end
 
       def toggle_axis_lock(axis, view)
@@ -825,6 +950,15 @@ module ASM_Extensions
       end
 
       def effective_cursor_position(view = nil)
+        return @source_axis_snap[:position] if @source_axis_snap
+        cursor_position_pre_source_snap(view)
+      end
+
+      # Cursor position honoring only @axis_lock (and native pick). Used both
+      # by effective_cursor_position as the no-snap fallback, and by
+      # update_source_axis_snap to evaluate the cursor's standing alignment
+      # without recursing back through the source snap.
+      def cursor_position_pre_source_snap(view = nil)
         return @cursor_ip.position unless @axis_lock && @anchor_ip.valid?
 
         anchor   = @anchor_ip.position
