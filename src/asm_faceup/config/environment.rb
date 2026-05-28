@@ -9,18 +9,18 @@ module ASM_Extensions
     INFO_START   = EXTENSION[:dev_start].to_s.freeze
 
     # Copyright range: dev_start year to current year
-    copy_start   = INFO_START[/\d{4}/]&.to_i || 2023
-    copy_year    = Time.now.year rescue nil
-    copy_range   =
-      if copy_year.nil?
-        "#{copy_start}-Now"
-      elsif copy_year > copy_start
-        "#{copy_start}-#{copy_year}"
+    year_start   = INFO_START[/\d{4}/]&.to_i || 2023
+    year_current = Time.now.year rescue nil
+    year_range   =
+      if year_current.nil?
+        "#{year_start}-Now"
+      elsif year_current > year_start
+        "#{year_start}-#{year_current}"
       else
-        copy_start.to_s
+        year_start.to_s
       end
 
-    INFO_COPY    = "\u00A9 #{INFO_AUTHOR}, #{copy_range}".freeze
+    INFO_COPY    = "\u00A9 #{INFO_AUTHOR}, #{year_range}".freeze
 
   end # module FaceUp
 end # module ASM_Extensions
