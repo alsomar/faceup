@@ -276,6 +276,221 @@ body.dark-mode .text-muted {
   color: #8a8aaa !important;
 }
 
+/* Generic "muted text" utility for disabled/inactive labels. Modus' own
+   .text-muted is #595868 — actually darker than its default <label> colour,
+   so it barely reads as "muted". .asav-text-muted instead matches the deep
+   recessed tone used by stacks' .sp-field-inactive > label: the label nearly
+   sinks into the panel when the row is off, so the active rows stand out by
+   contrast. Reusable across extensions. */
+.asav-text-muted {
+  color: #d8d8d8 !important;
+}
+body.dark-mode .asav-text-muted {
+  color: #3a3a5a !important;
+}
+
+/* Generic "disabled row" wrapper. Same recessed palette as .asav-text-muted +
+   stacks' .sp-channel-pivot-btn:disabled — the row sinks into the panel rather
+   than fading via opacity. Apply to a parent: child <label>s mute on their own
+   and any .btn:disabled inside follows suit. Cursor stays "not-allowed" on the
+   whole row while real :disabled controls still block input. */
+.asav-disabled {
+  cursor: not-allowed;
+}
+.asav-disabled label {
+  color: #d8d8d8;
+}
+.asav-disabled .btn:disabled,
+.asav-disabled .btn:disabled:hover {
+  background-color: #f4f4f6;
+  border-color: #e0e2e5;
+  color: #d8d8d8;
+  opacity: 1;            /* override Modus' default :disabled fade */
+  cursor: not-allowed;
+}
+body.dark-mode .asav-disabled label {
+  color: #3a3a5a;
+}
+body.dark-mode .asav-disabled .btn:disabled,
+body.dark-mode .asav-disabled .btn:disabled:hover {
+  background-color: #16213e;
+  border-color: #2a2a4a;
+  color: #3a3a5a;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   "Inline field" widget — a compact one-row form field with a label on the
+   left, a fixed-width box reading like an input (with an optional unit
+   shown inside as a ::after suffix), step-buttons (◄ ►) and a leading
+   reset glyph at the start of the label. Mirrors stacks' value-field
+   pattern; portable across extensions.
+
+   Usage:
+     <div class="asav-inline-field" :class="{ 'asav-disabled': cond }">
+       <label class="asav-inline-label">
+         <a class="asav-reset-leading">…</a>
+         Label text
+       </label>
+       <div class="asav-scroll-row">
+         <label class="asav-input-suffix" :data-suffix="unit">
+           <input … :disabled="cond">
+         </label>
+         <button class="btn btn-outline-secondary btn-sm asav-step-btn" :disabled="cond">…</button>
+         <button class="btn btn-outline-secondary btn-sm asav-step-btn" :disabled="cond">…</button>
+       </div>
+     </div>
+   ───────────────────────────────────────────────────────────────────── */
+.asav-inline-field {
+  display: flex;
+  align-items: center;
+}
+.asav-inline-field .asav-inline-label {
+  flex: 0 0 auto;
+  margin-right: 0.5rem;
+  margin-bottom: 0;
+  white-space: nowrap;
+  position: relative;
+  padding-left: 2.5rem;   /* align text with the switch labels (Modus) */
+}
+/* Fixed-width box that reads like an input; the unit (when present) is
+   rendered as a ::after suffix inside it. field-sizing shrinks the real
+   input to its value so the "value unit" group stays centred (Chromium
+   123+; degrades to a natural-width input on older CEF). */
+.asav-inline-field .asav-scroll-row {
+  display: flex;
+  align-items: stretch;   /* buttons stretch to the value-box height */
+  gap: 4px;
+  margin-left: auto;      /* push value + buttons to the right */
+  flex: 0 1 150px;
+  min-width: 110px;
+  max-width: 60%;
+}
+.asav-inline-field .asav-input-suffix {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.8rem;
+  box-sizing: border-box;
+  height: calc(1.5em + 0.375rem + 2px);   /* match .form-control-sm / btn-sm */
+  border: 1px solid #ced4da;
+  border-radius: 0.125rem;
+  background-color: #fafafc;
+  margin-bottom: 0;       /* override the default <label> margin */
+  cursor: text;
+}
+.asav-inline-field .asav-input-suffix > input {
+  field-sizing: content;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 8px;
+  max-width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  text-align: center;
+  color: #495057;         /* strong text — darker than the muted unit suffix */
+  font-size: inherit;
+}
+.asav-inline-field .asav-input-suffix > input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.asav-inline-field .asav-input-suffix > input::-webkit-inner-spin-button,
+.asav-inline-field .asav-input-suffix > input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.asav-inline-field .asav-input-suffix::after {
+  content: attr(data-suffix);
+  font-size: 0.75rem;
+  color: #888;
+  pointer-events: none;
+  margin: 0 4px 0 0;
+}
+.asav-inline-field .asav-input-suffix[data-suffix=""]::after { display: none; }
+body.dark-mode .asav-inline-field .asav-input-suffix {
+  background-color: #1e2d50;
+  border-color: #8C8B96;
+}
+body.dark-mode .asav-inline-field .asav-input-suffix > input {
+  color: #c0c8d8;         /* lighter than the muted unit suffix */
+}
+
+/* Step-buttons next to the value (◄ ►). */
+.asav-inline-field .asav-step-btn {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.asav-inline-field .asav-step-btn .modus-icons {
+  font-size: 16px;
+}
+
+/* Leading reset glyph at the start of the label (resets the value to its
+   default). Dimmed + non-interactive when already at the default. */
+.asav-inline-field .asav-reset-leading {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2rem;            /* the switch-toggle width — reset centred within it */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  text-decoration: none;
+}
+.asav-inline-field .asav-reset-leading.is-disabled {
+  opacity: 0.35;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+.asav-inline-field .asav-reset-leading:hover { color: #0063a3; text-decoration: none; }
+.asav-inline-field .asav-reset-leading .modus-icons { font-size: 14px; vertical-align: middle; }
+body.dark-mode .asav-inline-field .asav-reset-leading { color: #777; }
+body.dark-mode .asav-inline-field .asav-reset-leading:hover { color: #4da6ff; }
+
+/* Disabled state — the .asav-input-suffix wrapper isn't a Bootstrap control
+   so the generic .asav-disabled rules above can't reach it; mirror the same
+   recessed palette here so the wrapper fades together with the label and
+   step-buttons. */
+.asav-inline-field.asav-disabled .asav-input-suffix {
+  background-color: #f4f4f6;
+  border-color: #e0e2e5;
+  cursor: not-allowed;
+}
+.asav-inline-field.asav-disabled .asav-input-suffix > input,
+.asav-inline-field.asav-disabled .asav-input-suffix::after {
+  color: #d8d8d8;
+}
+.asav-inline-field.asav-disabled .asav-input-suffix > input {
+  cursor: not-allowed;
+}
+.asav-inline-field.asav-disabled .asav-reset-leading {
+  opacity: 0.35;          /* same fade as .is-disabled — the glyph greys out
+                             whatever the value is, since the whole row is off */
+  pointer-events: none;
+  cursor: not-allowed;
+}
+body.dark-mode .asav-inline-field.asav-disabled .asav-input-suffix {
+  background-color: #16213e;
+  border-color: #2a2a4a;
+}
+body.dark-mode .asav-inline-field.asav-disabled .asav-input-suffix > input,
+body.dark-mode .asav-inline-field.asav-disabled .asav-input-suffix::after {
+  color: #3a3a5a;
+}
+
 body.dark-mode input:disabled {
   color: #7a7aaa;
 }

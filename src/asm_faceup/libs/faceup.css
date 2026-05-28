@@ -1,0 +1,7 @@
+/* FaceUp — extension-specific styles (additions on top of asav.css).
+
+   Currently empty: the inline-field widget used by Settings → Extruder
+   Options lives in asav.css as a reusable .asav-inline-field primitive
+   (with .asav-input-suffix, .asav-scroll-row, .asav-step-btn,
+   .asav-reset-leading). Add only rules here that are unique to FaceUp
+   and not worth porting to other extensions. */
