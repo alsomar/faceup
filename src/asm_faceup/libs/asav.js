@@ -80,9 +80,6 @@ function settingsJSON(config) {
     if (window.app) {
       window._settingsLoading = true;
 
-      window.app.settingsTest1       = config.settings_test1;
-      window.app.settingsTest2       = config.settings_test2;
-      window.app.settingsTest3       = config.settings_test3;
       window.app.settingsLanguage    = config.language;
       window.app.settingsContextMenu = config.context_menu;
       // darkMode: localStorage (cross-extension live state) wins; the

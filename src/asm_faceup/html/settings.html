@@ -106,42 +106,6 @@
             <!-- Accordion -->
             <div class="accordion" id="accordionSettings">
 
-              <!-- Test Options -->
-              <div class="card">
-                <div class="card-header collapsed" id="accordionTab2" role="button"
-                  data-toggle="collapse" data-target="#collapseTab2"
-                  aria-expanded="false" aria-controls="collapseTab2">
-                  <h6 class="mb-0">{{ t('html.settings.second_tab') }}</h6>
-                </div>
-                <div class="collapse" id="collapseTab2"
-                  aria-labelledby="accordionTab2" data-parent="#accordionSettings">
-                  <div class="card-body card-custom">
-
-                    <!-- Test Option 1 -->
-                    <div class="custom-control custom-switch">
-                      <input type="checkbox" class="custom-control-input" v-model="settingsTest1" id="settingsTest1">
-                      <label class="custom-control-label" for="settingsTest1">{{ t('html.settings.test_button_1') }}</label>
-                    </div>
-
-                    <!-- Test Option 2 -->
-                    <div class="custom-control custom-switch">
-                      <input type="checkbox" class="custom-control-input" v-model="settingsTest2" id="settingsTest2">
-                      <label class="custom-control-label" for="settingsTest2">{{ t('html.settings.test_button_2') }}</label>
-                    </div>
-
-                    <!-- Test Option 3 -->
-                    <div class="custom-control custom-switch">
-                      <input type="checkbox" class="custom-control-input" id="settingsTest3"
-                        v-model="settingsTest3" :disabled="!settingsTest2">
-                      <label class="custom-control-label" :class="!settingsTest2 ? 'text-muted' : ''" for="settingsTest3">
-                        {{ t('html.settings.test_button_3') }}
-                      </label>
-                    </div>
-
-                  </div>
-                </div>
-              </div>
-
               <!-- Extruder Options -->
               <div class="card">
                 <div class="card-header collapsed" id="accordionTab3" role="button"
@@ -345,11 +309,6 @@
           // Initial section
           section: 'settings',
 
-          // Test settings
-          settingsTest1: true,
-          settingsTest2: false,
-          settingsTest3: false,
-
           // Extruder Options
           settingsUseLastExtrusion:     true,
           settingsDefaultExtrusion:     '0',
@@ -398,7 +357,6 @@
         i18nLocale(val) {
           document.documentElement.lang = val;
         },
-        settingsTest2() { this._dependentToggles(); },
 
         settingsSnapshot(newVal, oldVal) {
           if (this._hydrating) return;
@@ -420,9 +378,6 @@
         },
         currentSettings() {
           return {
-            settings_test1:      this.settingsTest1,
-            settings_test2:      this.settingsTest2,
-            settings_test3:      this.settingsTest3,
             use_last_extrusion:       this.settingsUseLastExtrusion,
             default_extrusion:        this.settingsDefaultExtrusion,
             align_to_min_bb:          this.settingsAlignBoundingBox,
@@ -431,9 +386,6 @@
             dark_mode:           this.darkMode,
             // debug_mode intentionally excluded
           };
-        },
-        _dependentToggles() {
-          if (!this.settingsTest2) this.settingsTest3 = false;
         },
         saveNow() {
           if (window.sketchup && window.sketchup.user_settings) {
@@ -491,9 +443,6 @@
           $('#resetConfirmModal').modal('hide');
           this._hydrating = true;
 
-          this.settingsTest1              = true;
-          this.settingsTest2              = false;
-          this.settingsTest3              = false;
           this.settingsUseLastExtrusion     = true;
           this.settingsDefaultExtrusion     = '0';
           this.settingsAlignBoundingBox     = false;

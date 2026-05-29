@@ -5,11 +5,6 @@ module ASM_Extensions
   module FaceUp
 
     DEFAULT_CONFIG = {
-      # Test Settings
-      settings_test1: true,
-      settings_test2: false,
-      settings_test3: false,
-
       # General Options
       language: "auto",
       context_menu: false,
