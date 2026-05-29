@@ -1,32 +1,55 @@
-# Bundler
-Gemfile.lock
-.bundle/
-vendor/bundle/
-
-# RuboCop cache
-.rubocop-https---*/
-
-# Solargraph
-.solargraph.yml
-.yardoc/
-.yardopts
-
-# SketchUp
-*.rbz
-*.skb
-AutoSave_*.skp
-Snapshots/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Editor
-.vscode/settings.json
-*.swp
-*~
-
 # Claude Code
 .claude/
 CLAUDE.md
+CLAUDE.local.md
 .mcp.json
+
+# SketchUp
+*.skb
+*.rbe
+*.rbz
+*.skp.lock
+AutoSave_*.skp
+Snapshots/
+RBZ/
+
+# Ruby / Bundler
+*.gem
+*.rbc
+.bundle/
+vendor/bundle/
+Gemfile.lock
+.ruby-version
+.ruby-gemset
+.rvmrc
+
+# RuboCop / Solargraph / YARD
+.rubocop-*
+.solargraph.yml*
+.yardoc/
+.yardopts
+doc/
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+*~
+
+# Logs / temp / packaging
+*.log
+tmp/
+coverage/
+*.tar.gz
