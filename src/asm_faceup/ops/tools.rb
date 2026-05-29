@@ -175,30 +175,29 @@ module ASM_Extensions
 
       def initialize
         model = Sketchup.active_model
-        @selected_faces     = []
+        @selected_faces      = []
         unit_key = ASM_Extensions::FaceUp.model_length_unit(model)[:key]
         default = default_extrusion_to_length(CONFIG[:default_extrusion], unit_key)
-        @extrusion_distance = if CONFIG[:use_last_extrusion]
+        @extrusion_distance  = if CONFIG[:use_last_extrusion]
           stored = model.get_attribute('ASM_Extensions_FaceUp', 'last_extrusion_distance', nil)
           stored ? stored : default
         else
           default
         end
-        @status_text        = ""
-        @anchor_set         = false
-        @distance_frozen    = false
-        @frozen_point       = nil
-        @axis_lock          = nil
-        @flip_direction     = false
-        @operation_open     = false
-        @anchor_ip          = Sketchup::InputPoint.new
-        @cursor_ip          = Sketchup::InputPoint.new
-        @cursor_screen      = nil
-        @current_view       = nil
-        @preview_cache      = []
-        @inference_source   = nil
-        @source_axis_snap   = nil
-        @cursor_was_snapped = false
+        @status_text         = ""
+        @anchor_set          = false
+        @distance_frozen     = false
+        @frozen_point        = nil
+        @axis_lock           = nil
+        @flip_direction      = false
+        @operation_open      = false
+        @anchor_ip           = Sketchup::InputPoint.new
+        @cursor_ip           = Sketchup::InputPoint.new
+        @v_ip                = nil
+        @inference_lock_held = false
+        @cursor_screen       = nil
+        @current_view        = nil
+        @preview_cache       = []
       end
 
       def activate
@@ -236,13 +235,13 @@ module ASM_Extensions
           @operation_open = false
         end
         extruder(view) if @distance_frozen && !@selected_faces.empty?
-        @anchor_set         = false
-        @distance_frozen    = false
-        @frozen_point       = nil
-        @axis_lock          = nil
-        @inference_source   = nil
-        @source_axis_snap   = nil
-        @cursor_was_snapped = false
+        view.lock_inference if @inference_lock_held
+        @inference_lock_held = false
+        @anchor_set          = false
+        @distance_frozen     = false
+        @frozen_point        = nil
+        @axis_lock           = nil
+        @v_ip                = nil
         view.invalidate
       end
 
@@ -282,7 +281,8 @@ module ASM_Extensions
         else
           draw_extrusion_preview(view)
         end
-        draw_pick_guide(view)
+        draw_orange_line(view)
+        @cursor_ip.draw(view) if @cursor_ip.display?
       end
 
       def onLButtonDown(flags, x, y, view)
@@ -305,23 +305,16 @@ module ASM_Extensions
 
       def onKeyDown(key, repeat, flags, view)
         case key
-        when KEYS[:esc] # reset anchor, or exit tool if no anchor
+        when KEYS[:esc]
           if @anchor_set || @distance_frozen
-            @anchor_set         = false
-            @distance_frozen    = false
-            @frozen_point       = nil
-            @axis_lock          = nil
-            @inference_source   = nil
-            @source_axis_snap   = nil
-            @cursor_was_snapped = false
-            @anchor_ip          = Sketchup::InputPoint.new
+            reset_pick_state(view)
             update_status_text
             view.invalidate
             return true
           else
             reset_tool
           end
-        when KEYS[:tab] # flip extrusion direction
+        when KEYS[:tab]
           @flip_direction    = !@flip_direction
           @extrusion_distance = -@extrusion_distance
           update_vcb(nil, @extrusion_distance.to_s)
@@ -334,28 +327,38 @@ module ASM_Extensions
           toggle_axis_lock(:y, view)
         when KEYS[:arrow_up]    # Z axis (blue)
           toggle_axis_lock(:z, view)
+        when KEYS[:shift]
+          return false if repeat || @inference_lock_held
+          view.lock_inference(@cursor_ip)
+          @inference_lock_held = true
+          view.invalidate
+          return true
         end
+      end
+
+      def onKeyUp(key, repeat, flags, view)
+        if key == KEYS[:shift] && @inference_lock_held
+          view.lock_inference
+          @inference_lock_held = false
+          recompute_distance
+          view.invalidate
+          return true
+        end
+        false
       end
 
       def onMouseMove(flags, x, y, view)
         @cursor_screen = Geom::Point3d.new(x, y, 0)
         @current_view  = view
+        sync_inference_lock(flags, view)
         pick_cursor(view, x, y)
-
-        was_snapped = @cursor_was_snapped
-        @cursor_was_snapped = snapped?(@cursor_ip)
-
-        if @cursor_was_snapped
-          @inference_source = @cursor_ip.position.clone
-        elsif !was_snapped && !@cursor_ip.valid?
-          # Cursor completely lost — inference broken, like SketchUp native behavior.
-          @inference_source = nil
-        end
+        update_v_ip
 
         if @anchor_set && !@distance_frozen
           @extrusion_distance = compute_pick_distance(@cursor_ip)
           update_vcb(nil, @extrusion_distance.to_s)
         end
+        update_status_text
         view.invalidate
       end
 
@@ -384,129 +387,85 @@ module ASM_Extensions
 
       private
 
-      # Picks the cursor input point. Once the anchor is set, the anchor is
-      # passed as the inference reference so SketchUp offers native from-point
-      # axis inferences (with magnetism) instead of context-free ones.
+      # The cursor InputPoint uses the strongest available context:
+      # - @v_ip when a previously-snapped reference vertex/edge/face is alive,
+      #   so SketchUp draws "from V on X axis" inferences with native magnetism.
+      # - else @anchor_ip once an anchor click has been made, for from-anchor
+      #   axis inferences.
+      # - else nothing (free cursor).
       def pick_cursor(view, x, y)
-        if @anchor_set
+        if @v_ip && @v_ip.valid?
+          @cursor_ip.pick(view, x, y, @v_ip)
+        elsif @anchor_set
           @cursor_ip.pick(view, x, y, @anchor_ip)
         else
           @cursor_ip.pick(view, x, y)
         end
-        update_source_axis_snap(view, x, y)
       end
 
-      # Decide whether the correspondence to @inference_source should be active
-      # this frame, and if so where the cursor effectively sits.
+      # Snapshot the cursor as the from-point reference (V) the first time it
+      # snaps to a vertex or edge after the cursor was lost. Once V is set we
+      # don't retarget it until the cursor leaves the geometry entirely. Two
+      # reasons:
       #
-      # The line shows whenever the cursor is *already* aligned with V along a
-      # principal axis (within EXACT_AXIS_DEG) — no pulling needed in that
-      # case, since the orange line keeps whichever direction it had. This is
-      # the parallel-coincident scenario and the on-axis-vertex scenario.
+      # - Faces don't get to set V — SketchUp doesn't draw axis inferences from
+      #   face references, so drifting from a vertex onto an adjacent face
+      #   would silently kill the correspondence line.
+      # - Hovering near another vertex (e.g. an edge endpoint) doesn't get to
+      #   retarget V either. If it did, the cursor would magnetize to that new
+      #   vertex, V would jump there, and `(cursor − V) = 0` would erase the
+      #   correspondence line at the worst possible moment.
       #
-      # Otherwise we try a soft pull:
-      # - Post-anchor: only to a double-inference intersection (an anchor-axis
-      #   line crossed with a source-axis line). Keeps the orange line on its
-      #   own principal axis while the correspondence to V is on its own.
-      # - Pre-anchor: free projection onto the closest source axis. Useful for
-      #   landing the anchor on a line from V.
-      def update_source_axis_snap(view, x, y)
-        prior = @source_axis_snap
-        @source_axis_snap = nil
-        return unless @inference_source
-
-        current_pos = cursor_position_pre_source_snap(view)
-        if (axis = exact_v_axis_from(current_pos))
-          @source_axis_snap = { axis: axis, position: current_pos, d2: 0 }
-          return
+      # Frozen while the inference lock is held.
+      def update_v_ip
+        return if @inference_lock_held
+        if @v_ip
+          @v_ip = nil unless @cursor_ip.valid?
+        elsif @cursor_ip.vertex || @cursor_ip.edge
+          new_v = Sketchup::InputPoint.new
+          new_v.copy!(@cursor_ip)
+          @v_ip = new_v
         end
-
-        return if snapped?(@cursor_ip)
-
-        fresh =
-          if @anchor_set && @anchor_ip.valid?
-            best_anchor_source_intersection(view, x, y)
-          else
-            best_source_axis_projection(view, x, y)
-          end
-
-        if fresh
-          @source_axis_snap = fresh
-          return
-        end
-
-        # Hysteresis: keep the prior snap alive while within the larger
-        # release radius. Lets the saltito stick once the user has latched on.
-        return unless prior
-        d2 = squared_screen_distance(view, prior[:position], x, y)
-        @source_axis_snap = prior.merge(d2: d2) if d2 <= SOURCE_HOLD_PX * SOURCE_HOLD_PX
       end
 
-      # Whether (point - @inference_source) is along a principal axis within
-      # EXACT_AXIS_DEG. Returns the axis (:x/:y/:z) or nil.
-      def exact_v_axis_from(point)
-        vec = point - @inference_source
-        return nil if vec.length < 1e-6
-        vec = vec.normalize
-        AXIS_VECTORS.each do |axis, axis_vec|
-          cos_a = vec.dot(axis_vec).abs
-          cos_a = 1.0 if cos_a > 1.0
-          deg = Math.acos(cos_a) * 180.0 / Math::PI
-          return axis if deg <= EXACT_AXIS_DEG
+      # Reconcile the inference lock with the live Shift modifier bit. SketchUp's
+      # onKeyDown/Up for modifier keys is unreliable on Windows, so the flag
+      # bit (carried on every mouse-move event) is the canonical signal.
+      def sync_inference_lock(flags, view)
+        held = (flags & CONSTRAIN_MODIFIER_MASK) != 0
+        if held && !@inference_lock_held
+          view.lock_inference(@cursor_ip)
+          @inference_lock_held = true
+        elsif !held && @inference_lock_held
+          view.lock_inference
+          @inference_lock_held = false
+          recompute_distance
         end
-        nil
       end
 
-      def best_anchor_source_intersection(view, x, y)
-        anchor      = @anchor_ip.position
-        anchor_axes = @axis_lock ? [@axis_lock] : AXIS_VECTORS.keys
-        best        = nil
-
-        anchor_axes.each do |anchor_axis|
-          lock_vec = AXIS_VECTORS[anchor_axis]
-          AXIS_VECTORS.each_key do |source_axis|
-            next if source_axis == anchor_axis
-            third = (AXIS_VECTORS.keys - [anchor_axis, source_axis]).first
-            next if (component_of(anchor, third) - component_of(@inference_source, third)).abs > 1e-3
-
-            t   = (@inference_source - anchor).dot(lock_vec)
-            pos = anchor.offset(lock_vec, t)
-            d2  = squared_screen_distance(view, pos, x, y)
-            if d2 <= SOURCE_SNAP_PX * SOURCE_SNAP_PX && (best.nil? || d2 < best[:d2])
-              best = { axis: source_axis, position: pos, d2: d2 }
-            end
-          end
-        end
-        best
+      def toggle_axis_lock(axis, view)
+        return unless @anchor_set
+        @axis_lock = (@axis_lock == axis) ? nil : axis
+        recompute_distance
+        update_status_text
+        view.invalidate
       end
 
-      def best_source_axis_projection(view, x, y)
-        ray  = view.pickray(x, y)
-        best = nil
-        AXIS_VECTORS.each do |axis, axis_vec|
-          t   = closest_point_on_axis(@inference_source, axis_vec, ray[0], ray[1])
-          pos = @inference_source.offset(axis_vec, t)
-          d2  = squared_screen_distance(view, pos, x, y)
-          if d2 <= SOURCE_SNAP_PX * SOURCE_SNAP_PX && (best.nil? || d2 < best[:d2])
-            best = { axis: axis, position: pos, d2: d2 }
-          end
-        end
-        best
+      def recompute_distance
+        return unless @anchor_set && !@distance_frozen && @cursor_ip.valid?
+        @extrusion_distance = compute_pick_distance(@cursor_ip)
+        update_vcb(nil, @extrusion_distance.to_s)
       end
 
-      def squared_screen_distance(view, point_3d, x, y)
-        s = view.screen_coords(point_3d)
-        dx = s.x - x
-        dy = s.y - y
-        dx * dx + dy * dy
-      end
-
-      def component_of(point, axis)
-        case axis
-        when :x then point.x
-        when :y then point.y
-        when :z then point.z
-        end
+      def reset_pick_state(view)
+        view.lock_inference if @inference_lock_held
+        @inference_lock_held = false
+        @anchor_set          = false
+        @distance_frozen     = false
+        @frozen_point        = nil
+        @axis_lock           = nil
+        @v_ip                = nil
+        @anchor_ip           = Sketchup::InputPoint.new
       end
 
       def update_status_text
@@ -710,17 +669,16 @@ module ASM_Extensions
       end
 
       def reset_tool
-        @selected_faces     = []
-        @preview_cache      = []
-        @anchor_set         = false
-        @distance_frozen    = false
-        @frozen_point       = nil
-        @axis_lock          = nil
-        @inference_source   = nil
-        @source_axis_snap   = nil
-        @cursor_was_snapped = false
-        @flip_direction     = false
-        @operation_open     = false
+        @selected_faces      = []
+        @preview_cache       = []
+        @anchor_set          = false
+        @distance_frozen     = false
+        @frozen_point        = nil
+        @axis_lock           = nil
+        @v_ip                = nil
+        @inference_lock_held = false
+        @flip_direction      = false
+        @operation_open      = false
         Sketchup::set_status_text("", SB_PROMPT)
         UI.start_timer(0) { Sketchup.active_model.select_tool(nil) }
       end
@@ -765,76 +723,44 @@ module ASM_Extensions
         arrow_left:  37,
         arrow_right: 39,
         arrow_up:    38,
+        shift:       16,  # VK_SHIFT / CONSTRAIN_MODIFIER_KEY on Windows
       }.freeze
 
       CIRCLE_SEGMENTS = 16
 
-      def draw_pick_guide(view)
-        return unless @cursor_screen
+      # Orange line from anchor to the effective cursor position. Recolors and
+      # thickens to the axis color when arrow-key axis lock is engaged. The
+      # cursor's own inference marker and from-V/from-anchor axis lines are
+      # drawn natively by @cursor_ip.draw(view).
+      def draw_orange_line(view)
+        return unless @anchor_ip.valid?
+        cursor_pos = effective_cursor_position(view)
+        return unless cursor_pos
+        s1 = view.screen_coords(@anchor_ip.position)
+        s2 = view.screen_coords(cursor_pos)
 
-        # Lines first, points on top
-        if @anchor_ip.valid?
-          cursor_pos = effective_cursor_position(view)
-          s1 = view.screen_coords(@anchor_ip.position)
-          s2 = view.screen_coords(cursor_pos)
-
-          if @axis_lock
-            view.line_width    = 2
-            view.drawing_color = AXIS_COLORS[@axis_lock]
-          else
-            view.line_width    = 1
-            view.drawing_color = ORANGE
-          end
-          view.draw2d(GL_LINES,
-            Geom::Point3d.new(s1.x, s1.y, 0),
-            Geom::Point3d.new(s2.x, s2.y, 0))
-          view.line_width = 1
-
-          draw_frozen_marker(view, @frozen_point, @anchor_ip.position) if @frozen_point
-
-          if @anchor_set
-            draw_inference_circle(view, @anchor_ip.position, ORANGE)
-          elsif snapped?(@anchor_ip)
-            draw_inference_marker(view, @anchor_ip.position, @anchor_ip)
-          end
-        end
-
-        # Cursor marker — projected point on the locked axis / source snap
-        # (or raw screen if no snap).
-        if @cursor_ip.valid?
-          cursor_pos         = effective_cursor_position(view)
-          position_overridden = (@axis_lock || @source_axis_snap) && @cursor_ip.position != cursor_pos
-
-          # Correspondence line: a dotted line from the last snapped reference
-          # point to the cursor. Shown only when the cursor is genuinely on a
-          # source axis — either pulled there by the soft snap, or because it
-          # snapped to geometry that happens to lie on the axis. Without the
-          # snap gate, the 3° tolerance corridor of axis_for_line let an
-          # oblique line appear before the soft snap engaged.
-          if @inference_source && !@axis_lock && (
-               @source_axis_snap ||
-               (snapped?(@cursor_ip) && axis_for_line(view, @inference_source, cursor_pos))
-             )
-            view.line_stipple = '.'
-            view.drawing_color = INFERENCE_COLORS[:none]
-            view.draw(GL_LINES, @inference_source, cursor_pos)
-            view.line_stipple = ''
-            draw_inference_circle(view, @inference_source, INFERENCE_COLORS[:none])
-          end
-
-          if position_overridden
-            draw_inference_circle(view, cursor_pos, INFERENCE_COLORS[:none])
-            view.line_stipple = '.'
-            view.drawing_color = INFERENCE_COLORS[:none]
-            view.draw(GL_LINES, @cursor_ip.position, cursor_pos)
-            view.line_stipple = ''
-            draw_inference_marker(view, @cursor_ip.position, @cursor_ip) if snapped?(@cursor_ip)
-          elsif snapped?(@cursor_ip)
-            draw_inference_marker(view, cursor_pos, @cursor_ip)
-          end
+        if @axis_lock
+          view.line_width    = 2
+          view.drawing_color = AXIS_COLORS[@axis_lock]
         else
-          view.drawing_color = INFERENCE_COLORS[:none]
-          view.draw2d(GL_POLYGON, circle_pts(@cursor_screen.x, @cursor_screen.y))
+          view.line_width    = 1
+          view.drawing_color = ORANGE
+        end
+        view.draw2d(GL_LINES,
+          Geom::Point3d.new(s1.x, s1.y, 0),
+          Geom::Point3d.new(s2.x, s2.y, 0))
+        view.line_width = 1
+
+        draw_anchor_dot(view)
+        draw_frozen_marker(view, @frozen_point, @anchor_ip.position) if @frozen_point
+      end
+
+      def draw_anchor_dot(view)
+        return unless @anchor_ip.valid?
+        if @anchor_set
+          draw_inference_circle(view, @anchor_ip.position, ORANGE)
+        elsif snapped?(@anchor_ip)
+          draw_inference_marker(view, @anchor_ip.position, @anchor_ip)
         end
       end
 
@@ -903,83 +829,17 @@ module ASM_Extensions
         ip.vertex || ip.edge || ip.face
       end
 
-      AXIS_PARALLEL_DEG = 3.0  # max 3D angular deviation to read a segment as axis-parallel
-      EXACT_AXIS_DEG    = 0.5  # tight tolerance for "cursor sits on a V axis already"
-      MIN_LINE_PIXELS   = 24   # screen dead zone around the reference point before the line shows
-      SOURCE_SNAP_PX    = 18   # magnetic radius to engage soft snap to a V axis
-      SOURCE_HOLD_PX    = 32   # hysteresis: keep an engaged snap until cursor escapes this radius
-
-      # Whether the from→to 3D segment is parallel to a principal axis within
-      # AXIS_PARALLEL_DEG. Returns the matched axis (:x/:y/:z) or nil. Pure —
-      # writes no state. The camera is consulted only for the screen deadzone
-      # so a tiny on-screen line near the reference doesn't flicker.
-      def axis_for_line(view, from, to)
-        s_from = view.screen_coords(from)
-        s_to   = view.screen_coords(to)
-        ldx = s_to.x - s_from.x
-        ldy = s_to.y - s_from.y
-        return nil if (ldx * ldx + ldy * ldy) < MIN_LINE_PIXELS * MIN_LINE_PIXELS
-
-        vec = to - from
-        return nil if vec.length < 1e-6
-        vec = vec.normalize
-
-        best_axis = nil
-        best_deg  = nil
-        AXIS_VECTORS.each do |axis, axis_vec|
-          cos_a = vec.dot(axis_vec).abs
-          cos_a = 1.0 if cos_a > 1.0
-          deg = Math.acos(cos_a) * 180.0 / Math::PI
-          if best_deg.nil? || deg < best_deg
-            best_axis = axis
-            best_deg  = deg
-          end
-        end
-        (best_deg && best_deg <= AXIS_PARALLEL_DEG) ? best_axis : nil
-      end
-
-      def toggle_axis_lock(axis, view)
-        return unless @anchor_set
-        @axis_lock = (@axis_lock == axis) ? nil : axis
-        if !@distance_frozen && @cursor_ip.valid?
-          @extrusion_distance = compute_pick_distance(@cursor_ip)
-          update_vcb(nil, @extrusion_distance.to_s)
-        end
-        update_status_text
-        view.invalidate
-      end
-
+      # Cursor position with the arrow-key axis lock applied (hard projection
+      # onto anchor + t * AXIS_VECTORS[@axis_lock]). Returns the raw
+      # @cursor_ip.position otherwise. SketchUp's native inference lock (Shift)
+      # is honored by @cursor_ip itself — no projection needed here.
       def effective_cursor_position(view = nil)
-        return @source_axis_snap[:position] if @source_axis_snap
-        cursor_position_pre_source_snap(view)
-      end
-
-      # Cursor position honoring only @axis_lock (and native pick). Used both
-      # by effective_cursor_position as the no-snap fallback, and by
-      # update_source_axis_snap to evaluate the cursor's standing alignment
-      # without recursing back through the source snap.
-      def cursor_position_pre_source_snap(view = nil)
+        return nil unless @cursor_ip.valid?
         return @cursor_ip.position unless @axis_lock && @anchor_ip.valid?
 
         anchor   = @anchor_ip.position
         axis_vec = AXIS_VECTORS[@axis_lock]
-
-        # If the cursor has snapped to a real point (vertex, midpoint, edge, face),
-        # project that point's snapped coordinate onto the locked axis directly.
-        # This lets the user reference geometry from other objects — only the
-        # axis-aligned component of the snapped position is used.
-        if @cursor_ip.valid?
-          return anchor.offset(axis_vec, (@cursor_ip.position - anchor).dot(axis_vec))
-        end
-
-        # No snap — fall back to projecting the camera ray onto the axis.
-        if view && @cursor_screen
-          ray = view.pickray(@cursor_screen.x.to_i, @cursor_screen.y.to_i)
-          t   = closest_point_on_axis(anchor, axis_vec, ray[0], ray[1])
-          return anchor.offset(axis_vec, t)
-        end
-
-        @cursor_ip.position
+        anchor.offset(axis_vec, (@cursor_ip.position - anchor).dot(axis_vec))
       end
 
       def closest_point_on_axis(anchor, axis_vec, ray_origin, ray_dir)
@@ -1012,7 +872,7 @@ module ASM_Extensions
 
       def compute_pick_distance(target_ip)
         return @extrusion_distance unless @anchor_ip.valid? && target_ip.valid?
-        endpoint = effective_cursor_position(@current_view)
+        endpoint = effective_cursor_position(@current_view) || target_ip.position
         vec      = endpoint - @anchor_ip.position
         (@flip_direction ? -vec.length : vec.length).to_l
       end
