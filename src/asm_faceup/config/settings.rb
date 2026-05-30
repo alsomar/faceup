@@ -1,6 +1,3 @@
-require 'json'
-require 'fileutils'
-
 module ASM_Extensions
   module FaceUp
 

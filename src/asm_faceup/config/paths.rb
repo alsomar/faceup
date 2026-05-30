@@ -1,4 +1,3 @@
-require "sketchup"
 require "fileutils"
 
 module ASM_Extensions
