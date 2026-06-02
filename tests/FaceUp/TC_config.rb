@@ -7,7 +7,6 @@ module ASM_Extensions
     class TC_config < TestUp::TestCase
 
       EXPECTED_KEYS = %i[
-        settings_test1 settings_test2 settings_test3
         use_last_extrusion default_extrusion align_to_min_bb
         language context_menu dark_mode debug_mode
       ].freeze
@@ -29,7 +28,6 @@ module ASM_Extensions
 
       def test_default_config_boolean_values
         bool_keys = %i[
-          settings_test1 settings_test2 settings_test3
           use_last_extrusion context_menu dark_mode debug_mode
         ]
         bool_keys.each do |key|
