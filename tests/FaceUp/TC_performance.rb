@@ -150,8 +150,11 @@ module ASM_Extensions
 
         # The optimised version must not be worse than 1.5× the legacy time.
         # (It will normally be faster; the generous multiplier avoids flakiness
-        # on loaded machines while still catching a serious regression.)
-        assert t_current <= t_legacy * 1.5,
+        # on loaded machines while still catching a serious regression.) A
+        # noise floor protects against sub-millisecond runs where t_legacy
+        # rounds to 0 and any t_current > 0 would fail the bare ratio.
+        budget = [t_legacy * 1.5, 0.005].max
+        assert t_current <= budget,
           "xtrd_groups (current) #{format('%.3f', t_current)}s is slower than " \
           "legacy #{format('%.3f', t_legacy)}s — possible regression"
       end
@@ -258,7 +261,8 @@ module ASM_Extensions
         t_legacy  = Benchmark.realtime { faces_legacy.each  { |f| has_inner_edges_legacy(f)  } }
         t_current = Benchmark.realtime { faces_current.each { |f| has_inner_edges_current(f) } }
 
-        assert t_current <= t_legacy * 1.5,
+        budget = [t_legacy * 1.5, 0.005].max
+        assert t_current <= budget,
           "face2group (Set) #{format('%.3f', t_current)}s should not be slower than " \
           "legacy (Array) #{format('%.3f', t_legacy)}s"
       end
