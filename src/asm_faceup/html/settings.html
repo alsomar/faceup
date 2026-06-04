@@ -139,24 +139,22 @@
                           @click.stop.prevent="resetExtrusion($event)">
                           <i class="modus-icons" aria-hidden="true">refresh</i>
                         </a>
-                        {{ t('html.settings.default_extrusion') }}
+                        {{ t('html.settings.default_extrusion') }}<template v-if="settingsModelUnit"> ({{ settingsModelUnit }})</template>
                       </label>
                       <div class="asav-scroll-row">
-                        <label class="asav-input-suffix" :data-suffix="settingsModelUnit">
+                        <label class="asav-input-suffix">
                           <input type="number" min="0" step="any" id="settingsDefaultExtrusion"
                             v-model="settingsDefaultExtrusion"
                             :disabled="settingsUseLastExtrusion">
                         </label>
                         <button type="button" class="btn btn-outline-secondary btn-sm asav-step-btn"
                           :disabled="settingsUseLastExtrusion"
-                          @pointerdown.prevent="startStep(-1)" @pointerup="stopStep"
-                          @pointerleave="stopStep" @pointercancel="stopStep">
+                          @mousedown.prevent="startStep($event, -1)">
                           <i class="modus-icons" aria-hidden="true">caret_left</i>
                         </button>
                         <button type="button" class="btn btn-outline-secondary btn-sm asav-step-btn"
                           :disabled="settingsUseLastExtrusion"
-                          @pointerdown.prevent="startStep(1)" @pointerup="stopStep"
-                          @pointerleave="stopStep" @pointercancel="stopStep">
+                          @mousedown.prevent="startStep($event, 1)">
                           <i class="modus-icons" aria-hidden="true">caret_right</i>
                         </button>
                       </div>
@@ -397,10 +395,21 @@
           if (ev && ev.currentTarget) ev.currentTarget.blur();
           this.darkMode = !this.darkMode;
         },
+        // Base step per model unit. m / ft / yd take 0.1; the rest stay at 1
+        // so the unit-sized increment feels natural across metric and imperial.
+        unitStepBase() {
+          switch (this.settingsModelUnit) {
+            case 'm':
+            case 'ft':
+            case 'yd': return 0.1;
+            default:   return 1;
+          }
+        },
         stepExtrusion(dir, mult) {
           if (this.settingsUseLastExtrusion) return;
-          const cur = parseFloat(this.settingsDefaultExtrusion);
-          let v = (isNaN(cur) ? 0 : cur) + dir * (mult || 1);
+          const cur  = parseFloat(this.settingsDefaultExtrusion);
+          const step = this.unitStepBase() * (mult || 1);
+          let v = (isNaN(cur) ? 0 : cur) + dir * step;
           if (v < 0) v = 0;
           this.settingsDefaultExtrusion = String(Math.round(v * 1000) / 1000);
         },
@@ -412,7 +421,7 @@
           if (tick > 15) return 4;
           return 1;
         },
-        startStep(dir) {
+        startStep(event, dir) {
           this.stopStep();
           this.stepExtrusion(dir, 1);             // immediate click
           let tick = 0;
@@ -422,10 +431,39 @@
               this.stepExtrusion(dir, this._scrollMult(tick));
             }, 50);
           }, 350);
+          // Release detection cribbed from stacks: poll the button's :active
+          // state (covers drag-off, missed mouseup, lost focus) and attach
+          // safety listeners at the document/window level so a release that
+          // happens outside the button still stops the timer.
+          const btn = event && event.currentTarget;
+          this._stepBtn = btn || null;
+          this._stepPoll = setInterval(() => {
+            if (!this._stepBtn || !document.contains(this._stepBtn) || !this._stepBtn.matches(':active')) {
+              this.stopStep();
+            }
+          }, 80);
+          const stop = () => this.stopStep();
+          this._stepSafetyHandler = stop;
+          document.addEventListener('mouseup',          stop, true);
+          document.addEventListener('pointerup',        stop, true);
+          document.addEventListener('pointercancel',    stop, true);
+          document.addEventListener('visibilitychange', stop, true);
+          window.addEventListener('blur',               stop, true);
         },
         stopStep() {
-          if (this._stepHold) { clearTimeout(this._stepHold); this._stepHold = null; }
-          if (this._stepTimer) { clearInterval(this._stepTimer); this._stepTimer = null; }
+          if (this._stepHold)  { clearTimeout(this._stepHold);    this._stepHold  = null; }
+          if (this._stepTimer) { clearInterval(this._stepTimer);  this._stepTimer = null; }
+          if (this._stepPoll)  { clearInterval(this._stepPoll);   this._stepPoll  = null; }
+          this._stepBtn = null;
+          if (this._stepSafetyHandler) {
+            const stop = this._stepSafetyHandler;
+            document.removeEventListener('mouseup',          stop, true);
+            document.removeEventListener('pointerup',        stop, true);
+            document.removeEventListener('pointercancel',    stop, true);
+            document.removeEventListener('visibilitychange', stop, true);
+            window.removeEventListener('blur',               stop, true);
+            this._stepSafetyHandler = null;
+          }
         },
         extrusionIsDefault() {
           const v = parseFloat(this.settingsDefaultExtrusion);
