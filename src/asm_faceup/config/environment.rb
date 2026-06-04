@@ -9,7 +9,7 @@ module ASM_Extensions
     INFO_START   = EXTENSION[:dev_start].to_s.freeze
 
     # Copyright range: dev_start year to current year
-    year_start   = INFO_START[/\d{4}/]&.to_i || 2023
+    year_start   = (INFO_START[/\d{4}/] || "2023").to_i
     year_current = Time.now.year rescue nil
     year_range   =
       if year_current.nil?
