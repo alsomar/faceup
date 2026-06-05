@@ -51,7 +51,6 @@ module ASM_Extensions
       end
 
       def self.push_initial_data(dialog)
-        Lang.configure(CONFIG[:language] || "auto") if Lang.dictionary.empty?
         config  = ASM_Extensions::FaceUp.load_config
         config[:model_unit] = ASM_Extensions::FaceUp.model_length_unit(Sketchup.active_model)[:abbr]
         payload = { locale: Lang.locale.to_s, data: Lang.dump }.to_json

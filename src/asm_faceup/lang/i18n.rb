@@ -137,6 +137,7 @@ module ASM_Extensions
       end
 
       def self.dictionary
+        ensure_loaded
         @data
       end
 
@@ -145,7 +146,18 @@ module ASM_Extensions
       end
 
       def self.root
+        ensure_loaded
         @root ||= Node.new([], @data, @fallback, debug_proc)
+      end
+
+      # Defensive: an Extension Sources reload re-runs `@data = {}` at the
+      # module level, so any Lang access after a reload would find an empty
+      # dictionary. Re-configure on the fly when that happens. Called from
+      # every public entry point that touches @data (root, dictionary, dump).
+      def self.ensure_loaded
+        return unless @data.nil? || @data.empty?
+        lang = (defined?(CONFIG) && CONFIG.is_a?(Hash) ? CONFIG[:language] : nil) || "auto"
+        configure(lang)
       end
 
       def self.commands
@@ -216,6 +228,7 @@ module ASM_Extensions
       private_class_method :load_rb
       private_class_method :load_locale_files
       private_class_method :format_update_date
+      private_class_method :ensure_loaded
 
       def self.month_name(time, format = :long)
         idx  = time.month - 1
