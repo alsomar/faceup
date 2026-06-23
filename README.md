@@ -4,7 +4,7 @@ FaceUp is a SketchUp extension aimed at simplifying the process of face creation
 
 ## Features
 - **Summon Faces:** Select edges and use the ‘Summon Faces’ option to create faces.
-- **Extrude Faces:** Select faces and choose the ‘Extruder’ tool to start extruding. Adjust the distance and preview in either face or edge mode.
+- **Extrude Faces:** Select faces and choose the ‘FaceUp’ tool to start extruding. Adjust the distance and preview in either face or edge mode.
 - **Access from Context Menu:** Right-click on a selection to access FaceUp functionalities directly from the context menu.
 
 ## License
