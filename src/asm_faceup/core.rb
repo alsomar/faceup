@@ -31,13 +31,21 @@ module ASM_Extensions
       cmd_summonfaces = cmd
       @commands[:summonfaces] = cmd
 
-      cmd = UI::Command.new(Lang.commands.extruder.label.to_s) { self.extruder_tool }
-      cmd.small_icon = self.icon("extruder_16")
-      cmd.large_icon = self.icon("extruder_24")
-      cmd.status_bar_text = Lang.commands.extruder.status
-      cmd.tooltip = Lang.commands.extruder.tooltip
-      cmd_extruder = cmd
-      @commands[:extruder] = cmd
+      cmd = UI::Command.new(Lang.commands.faceup.label.to_s) { self.faceup_tool }
+      cmd.small_icon = self.icon("faceup_16")
+      cmd.large_icon = self.icon("faceup_24")
+      cmd.status_bar_text = Lang.commands.faceup.status
+      cmd.tooltip = Lang.commands.faceup.tooltip
+      cmd_faceup = cmd
+      @commands[:faceup] = cmd
+
+      cmd = UI::Command.new(Lang.commands.surfaceup.label.to_s) { self.surfaceup_tool }
+      cmd.small_icon = self.icon("surfaceup_16")
+      cmd.large_icon = self.icon("surfaceup_24")
+      cmd.status_bar_text = Lang.commands.surfaceup.status
+      cmd.tooltip = Lang.commands.surfaceup.tooltip
+      cmd_surfaceup = cmd
+      @commands[:surfaceup] = cmd
 
       cmd = UI::Command.new(Lang.commands.turbo.label.to_s) { self.turbo_tool }
       cmd.small_icon = self.icon("turbo_16")
@@ -58,7 +66,8 @@ module ASM_Extensions
       # Menu
       menu = UI.menu('Extensions').add_submenu(EXT_NAME)
       menu.add_item(cmd_summonfaces)
-      menu.add_item(cmd_extruder)
+      menu.add_item(cmd_faceup)
+      menu.add_item(cmd_surfaceup)
       menu.add_separator
       menu.add_item(cmd_turbo)
       menu.add_separator
@@ -70,7 +79,8 @@ module ASM_Extensions
         menu = context_menu.add_submenu(EXT_NAME)
         menu.add_separator
         menu.add_item(cmd_summonfaces)
-        menu.add_item(cmd_extruder)
+        menu.add_item(cmd_faceup)
+        menu.add_item(cmd_surfaceup)
         menu.add_separator
         menu.add_item(cmd_turbo)
       end
@@ -78,7 +88,8 @@ module ASM_Extensions
       # Toolbar
       toolbar = UI::Toolbar.new(EXT_NAME)
       toolbar.add_item(cmd_summonfaces)
-      toolbar.add_item(cmd_extruder)
+      toolbar.add_item(cmd_faceup)
+      toolbar.add_item(cmd_surfaceup)
       toolbar.add_separator
       toolbar.add_item(cmd_turbo)
       toolbar.add_separator
@@ -96,8 +107,12 @@ module ASM_Extensions
         ASM_Extensions::FaceUp.summon_faces
       end
 
-      def self.extruder_tool
-        Sketchup.active_model.select_tool(ExtruderTool.new)
+      def self.faceup_tool
+        Sketchup.active_model.select_tool(FaceUpTool.new)
+      end
+
+      def self.surfaceup_tool
+        Sketchup.active_model.select_tool(FaceUpTool.new(mode: :surface))
       end
 
       def self.turbo_tool

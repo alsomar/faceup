@@ -84,7 +84,7 @@ module ASM_Extensions
     end
 
     ### MIN-AREA BOUNDING RECTANGLE (2D) ### --------------------------------------
-    # Pure helpers for the Extruder's optional min-volume axis alignment. Kept
+    # Pure helpers for FaceUp's optional min-volume axis alignment. Kept
     # free of SketchUp model state so they can be unit-tested with plain arrays.
 
     # Andrew's monotone-chain convex hull. pts: [[x, y], ...]. Returns the hull
@@ -169,11 +169,15 @@ module ASM_Extensions
         { key: 'model', abbr: '' }
     end
 
-    ### EXTRUDER TOOL ### ---------------------------------------------------------
+    ### FACEUP TOOL ### -----------------------------------------------------------
 
-    class ExtruderTool
+    class FaceUpTool
 
-      def initialize
+      MODES = %i[face surface].freeze
+
+      def initialize(mode: :face)
+        raise ArgumentError, "Unknown mode: #{mode.inspect}" unless MODES.include?(mode)
+        @mode = mode
         model = Sketchup.active_model
         @selected_faces      = []
         unit_key = ASM_Extensions::FaceUp.model_length_unit(model)[:key]
@@ -198,6 +202,10 @@ module ASM_Extensions
         @cursor_screen       = nil
         @current_view        = nil
         @preview_cache       = []
+        @coordinated_extrusion = (mode == :surface)
+        @coord_unit_disp_by_pos = nil
+        @coord_shared_edge_pos  = nil
+        @ctrl_was_held          = false
       end
 
       def activate
@@ -206,7 +214,7 @@ module ASM_Extensions
         @selected_faces = selection.grep(Sketchup::Face)
 
         if @selected_faces.empty?
-          UI.messagebox(Lang.t(:tools, :extruder, :no_faces))
+          UI.messagebox(Lang.t(:tools, :faceup, :no_faces))
           UI.start_timer(0) { Sketchup.active_model.select_tool(nil) }
           return
         end
@@ -214,18 +222,23 @@ module ASM_Extensions
         Debug.separator
         Debug.log(self.class, __method__, "Tool activated — #{@selected_faces.size} face(s) selected")
 
-        @preview_cache = @selected_faces.map do |face|
-          mesh = face.mesh(7)
-          {
-            normal:     face.normal,
-            tris:       mesh.polygons.map { |tri| tri.map { |i| mesh.point_at(i.abs) } },
-            loop_pts:   face.outer_loop.vertices.map(&:position),
-            hard_edges: face.outer_loop.edges.reject { |e| e.soft? || e.curve }.map { |e| [e.start.position, e.end.position] },
-          }
+        @preview_cache = if @mode == :surface
+          build_surface_preview_cache(@selected_faces)
+        else
+          @selected_faces.map do |face|
+            mesh = face.mesh(7)
+            {
+              normal:     face.normal,
+              tris:       mesh.polygons.map { |tri| tri.map { |i| mesh.point_at(i.abs) } },
+              loop_pts:   face.outer_loop.vertices.map(&:position),
+              hard_edges: face.outer_loop.edges.reject { |e| e.soft? || e.curve }.map { |e| [e.start.position, e.end.position] },
+            }
+          end
         end
 
         update_vcb
         update_status_text
+        start_ctrl_poll_timer if @mode == :surface
         model.active_view.invalidate
       end
 
@@ -234,7 +247,7 @@ module ASM_Extensions
           Sketchup.active_model.abort_operation
           @operation_open = false
         end
-        extruder(view) if @distance_frozen && !@selected_faces.empty?
+        execute(view) if @distance_frozen && !@selected_faces.empty?
         view.lock_inference if @inference_lock_held
         @inference_lock_held = false
         @anchor_set          = false
@@ -242,7 +255,54 @@ module ASM_Extensions
         @frozen_point        = nil
         @axis_lock           = nil
         @v_ip                = nil
+        stop_ctrl_poll_timer
         view.invalidate
+      end
+
+      # SketchUp eats Ctrl in `onKeyDown` on Windows and only delivers the
+      # COPY_MODIFIER_MASK bit through mouse-event flags, so a press without
+      # a follow-up cursor move would otherwise go unnoticed. We poll
+      # GetAsyncKeyState directly on Windows; on macOS we fall back to the
+      # mouse-flag path inside `onMouseMove`.
+      def start_ctrl_poll_timer
+        return unless Sketchup.platform == :platform_win
+        stop_ctrl_poll_timer
+        begin
+          require 'fiddle'
+          require 'fiddle/import'
+        rescue LoadError
+          return
+        end
+        @ctrl_async_key_state ||= Fiddle::Function.new(
+          Fiddle.dlopen('user32.dll')['GetAsyncKeyState'],
+          [Fiddle::TYPE_INT],
+          Fiddle::TYPE_SHORT,
+        )
+        @ctrl_poll_timer = UI.start_timer(0.05, true) do
+          poll_ctrl_state
+        end
+      end
+
+      def stop_ctrl_poll_timer
+        if @ctrl_poll_timer
+          UI.stop_timer(@ctrl_poll_timer)
+          @ctrl_poll_timer = nil
+        end
+      end
+
+      def poll_ctrl_state
+        return unless @ctrl_async_key_state
+        held = (@ctrl_async_key_state.call(0x11) & 0x8000) != 0
+        if held && !@ctrl_was_held
+          @coordinated_extrusion = !@coordinated_extrusion
+          rebuild_surface_preview_cache
+          update_status_text
+          (@current_view || Sketchup.active_model.active_view).invalidate
+        end
+        @ctrl_was_held = held
+      rescue StandardError => e
+        Debug.log(self.class, __method__, "Ctrl poll failed: #{e.class}: #{e.message}")
+        stop_ctrl_poll_timer
       end
 
       def enableVCB?
@@ -253,12 +313,22 @@ module ASM_Extensions
         bb = Sketchup.active_model.bounds
         return bb if @preview_cache.empty? || @extrusion_distance.zero?
 
-        @preview_cache.each do |data|
-          n    = data[:normal]
-          dist = @extrusion_distance
-          data[:loop_pts].each do |p|
-            bb.add(p)
-            bb.add(p.offset(n, dist))
+        dist = @extrusion_distance
+        if @mode == :surface
+          @preview_cache.each do |group|
+            group[:vert_disp].each do |v, disp|
+              p = group[:vert_pos][v]
+              bb.add(p)
+              bb.add(Geom::Point3d.new(p.x + dist * disp.x, p.y + dist * disp.y, p.z + dist * disp.z))
+            end
+          end
+        else
+          @preview_cache.each do |data|
+            n = data[:normal]
+            data[:loop_pts].each do |p|
+              bb.add(p)
+              bb.add(p.offset(n, dist))
+            end
           end
         end
 
@@ -363,12 +433,12 @@ module ASM_Extensions
       end
 
       def onReturn(view)
-        extruder(view)
+        execute(view)
         reset_tool
       end
 
       def onLButtonDoubleClick(flags, x, y, view)
-        extruder(view)
+        execute(view)
         reset_tool
       end
 
@@ -381,7 +451,7 @@ module ASM_Extensions
           update_status_text
           view.invalidate
         rescue ArgumentError
-          Sketchup::set_status_text(Lang.t(:tools, :extruder, :invalid_length), SB_PROMPT)
+          Sketchup::set_status_text(Lang.t(:tools, :faceup, :invalid_length), SB_PROMPT)
         end
       end
 
@@ -469,18 +539,30 @@ module ASM_Extensions
       end
 
       def update_status_text
-        dir = @flip_direction ? Lang.t(:tools, :extruder, :status_flipped) : ""
-        @status_text = if @distance_frozen
-          "#{Lang.t(:tools, :extruder, :status_adjust)}#{dir}"
-        elsif !@anchor_set
-          "#{Lang.t(:tools, :extruder, :status_idle)}#{dir}"
+        dir = @flip_direction ? Lang.t(:tools, :faceup, :status_flipped) : ""
+        coord_hint = if @mode == :surface
+          tag = @coordinated_extrusion ? " [COORDINADO]" : ""
+          " | Ctrl: alternar coordinado/independiente#{tag}"
         else
-          "#{Lang.t(:tools, :extruder, :status_pick)}#{dir}"
+          ""
+        end
+        @status_text = if @distance_frozen
+          "#{Lang.t(:tools, :faceup, :status_adjust)}#{dir}#{coord_hint}"
+        elsif !@anchor_set
+          "#{Lang.t(:tools, :faceup, :status_idle)}#{dir}#{coord_hint}"
+        else
+          "#{Lang.t(:tools, :faceup, :status_pick)}#{dir}#{coord_hint}"
         end
         Sketchup::set_status_text(@status_text)
       end
 
-      def extruder(view)
+      def rebuild_surface_preview_cache
+        return unless @mode == :surface
+        return if @selected_faces.empty?
+        @preview_cache = build_surface_preview_cache(@selected_faces)
+      end
+
+      def execute(view)
         return if @selected_faces.empty?
 
         faces_to_extrude = @selected_faces
@@ -493,7 +575,7 @@ module ASM_Extensions
         Debug.separator
         Debug.log(self.class, method_id, "Process START — distance=#{@extrusion_distance}")
 
-        model.start_operation("Extruder", true)
+        model.start_operation("FaceUp", true)
         @operation_open = true
 
         begin
@@ -523,6 +605,7 @@ module ASM_Extensions
 
       def draw_face_highlight(view)
         return if @preview_cache.empty?
+        return draw_surface_highlight(view) if @mode == :surface
 
         tris = @preview_cache.flat_map { |data| data[:tris].flatten }
 
@@ -535,6 +618,7 @@ module ASM_Extensions
 
       def draw_extrusion_preview(view)
         return if @preview_cache.empty?
+        return draw_surface_extrusion_preview(view) if @mode == :surface
 
         gray_tris  = []
         gray_quads = []
@@ -581,7 +665,317 @@ module ASM_Extensions
         view.draw(GL_LINES, hard_lines) unless hard_lines.empty?
       end
 
+      # Idle highlight when no distance is set yet: surface mode shows the
+      # welded surface as one mesh and outlines only its perimeter (not the
+      # internal soft edges that connect the constituent faces).
+      def draw_surface_highlight(view)
+        bottom_tris = []
+        outline_lines = []
+        @preview_cache.each do |group|
+          group[:tris].each do |tri|
+            tri.each { |meta| bottom_tris << surface_meta_bottom(meta) }
+          end
+          group[:boundary].each do |v1, v2, _n|
+            outline_lines << group[:vert_pos][v1] << group[:vert_pos][v2]
+          end
+        end
+
+        view.drawing_color = Sketchup::Color.new('white')
+        view.draw(GL_TRIANGLES, bottom_tris) unless bottom_tris.empty?
+
+        view.drawing_color = PREVIEW_BLUE
+        view.line_stipple  = ''
+        view.draw(GL_LINES, outline_lines) unless outline_lines.empty?
+      end
+
+      # Welded-surface extrusion preview. Per-vertex displacements come from
+      # the same LSQ solver as the executed extrusion, so the preview matches
+      # the final result (top is an equidistant surface, walls only on the
+      # surface boundary, internal soft edges disappear into the skin).
+      def draw_surface_extrusion_preview(view)
+        dist = @extrusion_distance
+        gray_tris      = []
+        gray_quads     = []
+        gray_extras    = []   # fan-triangulated walls when the quad isn't planar
+        white_tris     = []
+        outline_top    = []
+        outline_bottom = []
+        hard_corner_lines    = []
+        hard_internal_lines  = []
+
+        @preview_cache.each do |group|
+          vert_disp = group[:vert_disp]
+          vert_pos  = group[:vert_pos]
+
+          group[:tris].each do |tri|
+            bottom = tri.map { |meta| surface_meta_bottom(meta) }
+            top    = tri.map { |meta| surface_meta_top(meta, vert_disp, vert_pos, dist) }
+            gray_tris.concat(bottom)
+            white_tris.concat(top)
+          end
+
+          group[:boundary].each do |v1, v2, _n|
+            bs = vert_pos[v1]
+            be = vert_pos[v2]
+            ts = surface_top_pt(v1, vert_disp, vert_pos, dist)
+            te = surface_top_pt(v2, vert_disp, vert_pos, dist)
+            quad = [bs, be, te, ts]
+            if coplanar?(quad)
+              gray_quads.concat(quad)
+            else
+              # Fan-triangulate the twisted wall.
+              gray_extras.concat([bs, be, te, bs, te, ts])
+            end
+          end
+
+          # Verticals at corners whose two walls bend >60° between each
+          # other are predicted hard (the final classifier applies the
+          # same rule to the constructed geometry).
+          group[:hard_corner_verts].each_key do |corner|
+            bs = vert_pos[corner]
+            ts = surface_top_pt(corner, vert_disp, vert_pos, dist)
+            hard_corner_lines.concat([bs, ts])
+          end
+
+          # Internal hard top/bottom edges — the welded surface has a
+          # visible crease wherever two soft-connected faces bend > 60°.
+          # These run through the middle of the mesh fill, so we draw them
+          # in screen space to guarantee visibility.
+          group[:hard_internal_edges].each do |v1, v2|
+            bs = vert_pos[v1]
+            be = vert_pos[v2]
+            ts = surface_top_pt(v1, vert_disp, vert_pos, dist)
+            te = surface_top_pt(v2, vert_disp, vert_pos, dist)
+            hard_internal_lines.concat([bs, be, ts, te])
+          end
+
+          group[:boundary].each do |v1, v2, _n|
+            bs = vert_pos[v1]
+            be = vert_pos[v2]
+            outline_bottom << bs << be
+            outline_top    << surface_top_pt(v1, vert_disp, vert_pos, dist)
+            outline_top    << surface_top_pt(v2, vert_disp, vert_pos, dist)
+          end
+
+        end
+
+        view.drawing_color = Sketchup::Color.new(220, 220, 220)
+        view.draw(GL_TRIANGLES, gray_tris)   unless gray_tris.empty?
+        view.draw(GL_QUADS,     gray_quads)  unless gray_quads.empty?
+        view.draw(GL_TRIANGLES, gray_extras) unless gray_extras.empty?
+
+        view.drawing_color = Sketchup::Color.new('white')
+        view.draw(GL_TRIANGLES, white_tris) unless white_tris.empty?
+
+        view.drawing_color = PREVIEW_BLUE
+        view.line_stipple  = ''
+        view.draw(GL_LINES, outline_bottom)       unless outline_bottom.empty?
+        view.draw(GL_LINES, outline_top)          unless outline_top.empty?
+        view.draw(GL_LINES, hard_corner_lines)    unless hard_corner_lines.empty?
+
+        # Internal hard edges sit at exactly the same depth as the fill,
+        # so we lift them ~5 pixels' worth of model space toward the
+        # camera. That wins the z-fight against the fill while still
+        # letting depth-testing hide them when they're on the back side of
+        # the shell.
+        view.line_stipple = ''
+        view.draw(GL_LINES, lift_off_face(hard_internal_lines, view, 5)) unless hard_internal_lines.empty?
+      end
+
+      # Edges that pass through the middle of a filled mesh z-fight with
+      # the fill at exactly the same depth. Nudging each point toward the
+      # camera by a few pixels' worth of model space (computed at that
+      # point's own depth so perspective foreshortening doesn't shrink the
+      # offset on far points) wins the depth test against the fill while
+      # still leaving 3D depth-testing in place so the line is occluded
+      # by intervening front-facing geometry.
+      def lift_off_face(points, view, px = 5)
+        return points if points.empty?
+        d = view.camera.direction
+        points.map do |p|
+          amt = view.pixels_to_model(px, p)
+          amt = 0 if amt < 0
+          Geom::Point3d.new(p.x - amt * d.x, p.y - amt * d.y, p.z - amt * d.z)
+        end
+      end
+
+      def surface_meta_bottom(meta)
+        meta[0] == :v ? meta[1].position : meta[1]
+      end
+
+      def surface_meta_top(meta, vert_disp, vert_pos, dist)
+        if meta[0] == :v
+          surface_top_pt(meta[1], vert_disp, vert_pos, dist)
+        else
+          meta[1].offset(meta[2], dist)
+        end
+      end
+
+      def surface_top_pt(vertex, vert_disp, vert_pos, dist)
+        d = vert_disp[vertex]
+        p = vert_pos[vertex]
+        Geom::Point3d.new(p.x + dist * d.x, p.y + dist * d.y, p.z + dist * d.z)
+      end
+
+      # Build the cache entries for surface mode: one per soft-connected
+      # face group. Each entry stores per-vertex unit displacement (so the
+      # preview scales linearly with @extrusion_distance), pre-triangulated
+      # surface mesh, boundary edges (for wall preview) and hard boundary
+      # edges (for the blue outline).
+      def build_surface_preview_cache(faces)
+        groups = group_faces_by_soft_connectivity(faces)
+
+        if @coordinated_extrusion
+          coord = coordinated_preview_data(groups)
+        else
+          coord = nil
+        end
+
+        groups.each_with_index.map do |gfaces, i|
+          build_surface_preview_group(gfaces, coord, i)
+        end
+      end
+
+      # Position-keyed coordination data for the preview cache. Same
+      # algorithm as `compute_coord_data_by_position` — see notes there.
+      def coordinated_preview_data(groups)
+        compute_coord_data_by_position(groups)
+      end
+
+      def build_surface_preview_group(gfaces, coord = nil, _group_idx = nil)
+        vertex_faces = Hash.new { |h, k| h[k] = [] }
+        edge_face_count = Hash.new(0)
+        gfaces.each do |f|
+          f.vertices.each { |v| vertex_faces[v] << f }
+          f.edges.each    { |e| edge_face_count[e] += 1 }
+        end
+
+        vert_pos  = {}
+        vert_disp = {}
+        vertex_faces.each do |v, vf|
+          p = v.position
+          if coord
+            disp = coord[:unit_disp_by_pos][pos_key(p)]
+          end
+          unless disp
+            top1 = compute_offset_vertex(p, vf.map(&:normal), 1.0)
+            disp = Geom::Vector3d.new(top1.x - p.x, top1.y - p.y, top1.z - p.z)
+          end
+          vert_pos[v]  = p
+          vert_disp[v] = disp
+        end
+
+        tris = []
+        gfaces.each do |face|
+          mesh = face.mesh(7)
+          # Geom::Point3d doesn't implement value-based hash/eql, so use a
+          # rounded coordinate tuple as the lookup key. Without this the
+          # mesh's corner points fall through to the :interior branch and
+          # adjacent faces' tops drift apart at shared vertices.
+          loop_v_by_pos = {}
+          face.outer_loop.vertices.each do |v|
+            loop_v_by_pos[pos_key(v.position)] = v
+          end
+          point_meta = {}
+          (1..mesh.count_points).each do |pi|
+            pt = mesh.point_at(pi)
+            v  = loop_v_by_pos[pos_key(pt)]
+            point_meta[pi] = v ? [:v, v] : [:interior, pt, face.normal]
+          end
+          mesh.polygons.each do |tri|
+            tris << tri.map { |i| point_meta[i.abs] }
+          end
+        end
+
+        boundary            = []
+        hard_internal_edges = []
+        edge_seen           = {}
+        gfaces_set          = gfaces.to_set
+        gfaces.each do |face|
+          face.outer_loop.edges.each do |edge|
+            next if edge_seen[edge]
+            edge_seen[edge] = true
+            count = edge_face_count[edge]
+            if count == 1
+              v1 = edge.start
+              v2 = edge.end
+              boundary << [v1, v2, face.normal]
+            elsif count == 2
+              # Internal edge — predict hard top counterpart when the two
+              # adjacent faces bend > 60°.
+              in_group = edge.faces.select { |f| gfaces_set.include?(f) }
+              next unless in_group.size == 2
+              cos_a = in_group[0].normal.dot(in_group[1].normal)
+              cos_a =  1.0 if cos_a >  1.0
+              cos_a = -1.0 if cos_a < -1.0
+              hard_internal_edges << [edge.start, edge.end] if cos_a < 0.5
+            end
+          end
+        end
+
+        # Predict which corner verticals end up hard after extrusion: two
+        # adjacent walls meet at each boundary-corner vertex, and the
+        # vertical between them is hard when their outward normals form
+        # more than 60° — same threshold `classify_shell_edges` uses on
+        # the final geometry. Shared seams are in `boundary` too, so this
+        # catches seam-vs-perimeter junctions naturally.
+        hard_corner_verts = predict_hard_corner_verticals(boundary, vert_disp)
+
+        {
+          vert_pos:            vert_pos,
+          vert_disp:           vert_disp,
+          tris:                tris,
+          boundary:            boundary,
+          hard_corner_verts:   hard_corner_verts,
+          hard_internal_edges: hard_internal_edges,
+        }
+      end
+
+      def predict_hard_corner_verticals(boundary, vert_disp)
+        corner_walls = Hash.new { |h, k| h[k] = [] }
+        boundary.each do |v1, v2, fn|
+          corner_walls[v1] << [v1, v2, fn]
+          corner_walls[v2] << [v1, v2, fn]
+        end
+
+        cos_threshold = 0.5
+        hard = {}
+        corner_walls.each do |corner, walls|
+          next unless walls.size == 2
+          n1 = approximate_wall_normal(walls[0], corner, vert_disp)
+          n2 = approximate_wall_normal(walls[1], corner, vert_disp)
+          next unless n1 && n2 && n1.length > 1.0e-9 && n2.length > 1.0e-9
+          cos_a = n1.normalize.dot(n2.normalize)
+          cos_a =  1.0 if cos_a >  1.0
+          cos_a = -1.0 if cos_a < -1.0
+          hard[corner] = true if cos_a < cos_threshold
+        end
+        hard
+      end
+
+      def approximate_wall_normal(wall, corner, vert_disp)
+        v1, v2, _fn = wall
+        edge_vec = Geom::Vector3d.new(
+          v2.position.x - v1.position.x,
+          v2.position.y - v1.position.y,
+          v2.position.z - v1.position.z,
+        )
+        disp = vert_disp[corner]
+        return nil unless disp
+        edge_vec.cross(disp)
+      end
+
+      # Mode-aware dispatch. :face groups each face individually; :surface
+      # groups soft-edge-connected faces into one surface group. The surface
+      # branch is a placeholder until the welded-extrusion logic lands.
       def face2group(faces)
+        case @mode
+        when :face    then face2group_per_face(faces)
+        when :surface then face2group_per_surface(faces)
+        end
+      end
+
+      def face2group_per_face(faces)
         faces_with_inner_edges    = []
         faces_without_inner_edges = []
 
@@ -611,7 +1005,185 @@ module ASM_Extensions
         groups_with_inner_edges + groups_without_inner_edges
       end
 
+      # Group faces by soft-edge connectivity. Each connected component (faces
+      # reachable through soft edges only) goes into its own Sketchup::Group,
+      # together with all the edges that bound or stitch the surface. Visible
+      # (hard) edges remain group boundaries; soft edges are internal to the
+      # surface and survive into the lifted top.
+      def face2group_per_surface(faces)
+        surfaces = group_faces_by_soft_connectivity(faces)
+
+        # In coordinated mode, pre-compute a unified offset per vertex
+        # (using every selected face touching it, regardless of which
+        # surface group it belongs to) and the set of edges shared between
+        # surface groups, both keyed by position so they survive the
+        # add_group cloning that follows.
+        if @coordinated_extrusion
+          precompute_coordinated_surface_data(surfaces)
+        else
+          @coord_unit_disp_by_pos = nil
+          @coord_shared_edge_pos  = nil
+        end
+
+        ents = Sketchup.active_model.active_entities
+
+        # rubocop:disable SketchupSuggestions/AddGroup
+        surfaces.map do |surface_faces|
+          surface_edges = surface_faces.flat_map(&:edges).uniq
+          ents.add_group(surface_faces + surface_edges)
+        end
+        # rubocop:enable SketchupSuggestions/AddGroup
+      end
+
+      def precompute_coordinated_surface_data(surfaces)
+        data = compute_coord_data_by_position(surfaces)
+        @coord_unit_disp_by_pos = data[:unit_disp_by_pos]
+        @coord_shared_edge_pos  = data[:shared_edge_pos]
+        @coord_shared_edge_hard = data[:shared_edge_hard]
+      end
+
+      # Position-keyed coordination data. Walks topology via world coords
+      # rather than Edge/Vertex identity, so it works even when "adjacent"
+      # surfaces are actually floating geometry that only coincides
+      # spatially (common in faceted spheres built segment by segment).
+      #
+      # The map also pulls in faces from *outside* the selection that
+      # touch a selected vertex — that way extruding a single surface
+      # tilts its boundary to meet whatever neighbouring geometry is in
+      # the model, even if those neighbours aren't being extruded.
+      def compute_coord_data_by_position(surfaces)
+        pos_to_normals = {}
+        surfaces.each do |sf|
+          sf.each do |f|
+            f.vertices.each do |v|
+              k = pos_key(v.position)
+              acc = (pos_to_normals[k] ||= [])
+              acc << f.normal
+              v.faces.each { |adj| acc << adj.normal }
+            end
+          end
+        end
+
+        # Pull in normals from already-extruded surfaces in the model.
+        # Their original face is tagged with `SURFACE_ATTR_DICT`, so we
+        # don't have to guess which face in a group is the bottom — and
+        # the stored vector is the pre-reverse outward normal in the
+        # group's local frame, so we just transform it to world.
+        Sketchup.active_model.entities.grep(Sketchup::Group).each do |group|
+          xform = group.transformation
+          group.entities.grep(Sketchup::Face).each do |f|
+            stored = f.get_attribute(SURFACE_ATTR_DICT, SURFACE_ATTR_NORMAL)
+            next unless stored
+            # Stored is already in world coords (captured pre-alignment so
+            # the group's later axis rotation can't muddle it).
+            n_world = Geom::Vector3d.new(*stored)
+            f.vertices.each do |v|
+              k = pos_key(v.position.transform(xform))
+              next unless pos_to_normals.key?(k)
+              pos_to_normals[k] << n_world
+            end
+          end
+        end
+
+        pos_to_normals.each_value(&:uniq!)
+
+        unit_disp_by_pos = {}
+        pos_to_normals.each do |k, ns|
+          base = Geom::Point3d.new(k[0], k[1], k[2])
+          top1 = compute_offset_vertex(base, ns, 1.0)
+          unit_disp_by_pos[k] = Geom::Vector3d.new(top1.x - base.x, top1.y - base.y, top1.z - base.z)
+        end
+
+        # Edge (by position pair) → group indices that contain it as an
+        # outer-loop edge. Two groups sharing a position-pair = a seam,
+        # regardless of whether their Edge objects are actually the same.
+        edge_to_groups = {}
+        edge_to_faces  = {}
+        surfaces.each_with_index do |sf, gi|
+          sf.each do |f|
+            f.outer_loop.edges.each do |e|
+              k = edge_pos_key(e.start.position, e.end.position)
+              (edge_to_groups[k] ||= {})[gi] = true
+              (edge_to_faces[k]  ||= {})[gi] = f
+            end
+          end
+        end
+
+        shared_edge_pos  = {}
+        shared_edge_hard = {}
+        cos_threshold    = 0.5
+        edge_to_groups.each do |k, gset|
+          next if gset.size < 2
+          shared_edge_pos[k] = true
+          gis = gset.keys
+          n1 = edge_to_faces[k][gis[0]].normal
+          n2 = edge_to_faces[k][gis[1]].normal
+          cos_a = n1.dot(n2)
+          cos_a =  1.0 if cos_a >  1.0
+          cos_a = -1.0 if cos_a < -1.0
+          shared_edge_hard[k] = true if cos_a < cos_threshold
+        end
+
+        { unit_disp_by_pos: unit_disp_by_pos, shared_edge_pos: shared_edge_pos, shared_edge_hard: shared_edge_hard }
+      end
+
+      # Rounded position key — vertices on coincident geometry can have
+      # float coordinates that differ by epsilon (e.g., two SketchUp groups
+      # built independently sometimes produce 1.0 vs 1.0000000000001).
+      # 6 decimals comfortably exceeds SketchUp's 1/1000-inch precision
+      # while still collapsing those near-duplicates onto the same key.
+      POS_KEY_DECIMALS = 6
+
+      def pos_key(p)
+        [p.x.round(POS_KEY_DECIMALS), p.y.round(POS_KEY_DECIMALS), p.z.round(POS_KEY_DECIMALS)]
+      end
+
+      def edge_pos_key(p1, p2)
+        a = pos_key(p1)
+        b = pos_key(p2)
+        (a <=> b) <= 0 ? [a, b] : [b, a]
+      end
+
+      # Flood-fill `faces` through soft edges only. Faces not in the input
+      # selection are never crossed, so adjacent unselected geometry doesn't
+      # leak into a surface group.
+      def group_faces_by_soft_connectivity(faces)
+        face_set = faces.to_set
+        visited  = {}
+        groups   = []
+        faces.each do |start|
+          next if visited[start]
+          stack = [start]
+          group = []
+          until stack.empty?
+            f = stack.pop
+            next if visited[f]
+            visited[f] = true
+            group << f
+            f.edges.each do |edge|
+              next unless edge.soft?
+              edge.faces.each do |adj|
+                next unless face_set.include?(adj)
+                next if visited[adj]
+                stack << adj
+              end
+            end
+          end
+          groups << group
+        end
+        groups
+      end
+
+      # Mode-aware dispatch. :face pushpulls each group's face along its
+      # normal; :surface keeps soft-edge-connected faces welded as one body.
       def xtrd_groups(groups, height)
+        case @mode
+        when :face    then xtrd_groups_per_face(groups, height)
+        when :surface then xtrd_groups_per_surface(groups, height)
+        end
+      end
+
+      def xtrd_groups_per_face(groups, height)
         default_layer = Sketchup.active_model.layers[0]
         align         = CONFIG[:align_to_min_bb]
 
@@ -628,6 +1200,374 @@ module ASM_Extensions
           normal = faces.first.normal
           faces.first.pushpull(height)
           apply_min_bb_alignment(group, normal) if align
+        end
+      end
+
+      # Welded extrusion. Each face is lifted along its own normal, but
+      # adjacent faces (connected by a soft edge inside the same surface
+      # group) share the lifted vertices when they're coplanar — no internal
+      # walls — and are stitched by a ridge quad when they aren't. Boundary
+      # edges (only one adjacent face inside the group) carry a wall.
+      def xtrd_groups_per_surface(groups, height)
+        default_layer = Sketchup.active_model.layers[0]
+        align         = CONFIG[:align_to_min_bb]
+
+        groups.each do |group|
+          extrude_surface(group, height)
+
+          group.entities.grep(Sketchup::Face).each { |f| f.layer = default_layer }
+          group.entities.grep(Sketchup::Edge).each { |e| e.layer = default_layer }
+
+          if align
+            rep = group.entities.grep(Sketchup::Face).max_by(&:area)
+            apply_min_bb_alignment(group, rep.normal) if rep
+          end
+        end
+      end
+
+      def extrude_surface(group, height)
+        ents  = group.entities
+        faces = ents.grep(Sketchup::Face).to_a
+        return if faces.empty?
+
+        # `add_group` shifts geometry into the group's local frame, so
+        # vertex positions inside `ents` are local. The coordinated maps
+        # are keyed in world coordinates; we convert local→world for
+        # lookup and back to local when emitting V_top.
+        xform     = group.transformation
+        xform_inv = xform.inverse
+
+        # Tag every original surface face with its current (pre-extrusion)
+        # normal so a future extrusion of an adjacent surface can find it
+        # and coordinate. Two reasons for doing it now:
+        #
+        # 1. SketchUp re-fits the face plane when new edges connect to its
+        #    vertices, which can shift `f.normal` afterwards.
+        # 2. `apply_min_bb_alignment` later rotates the group's local axes,
+        #    so a stored *local* normal would no longer round-trip through
+        #    the group's transformation. We store the *world* normal so the
+        #    lookup can use it directly.
+        faces.each do |f|
+          n_world = f.normal.transform(xform)
+          f.set_attribute(SURFACE_ATTR_DICT, SURFACE_ATTR_NORMAL, [n_world.x, n_world.y, n_world.z])
+        end
+
+        # Adjacency maps inside the surface group.
+        vertex_faces = Hash.new { |h, k| h[k] = [] }
+        edge_faces   = Hash.new { |h, k| h[k] = [] }
+        faces.each do |face|
+          face.vertices.each { |v| vertex_faces[v] << face }
+          face.edges.each    { |e| edge_faces[e]   << face }
+        end
+
+        # One top position per bottom vertex. In coordinated mode the
+        # displacement comes from the global precomputed map (so vertices
+        # shared between adjacent surface groups land at the same point);
+        # otherwise it's the local LSQ over this group's own faces.
+        vertex_top = {}
+        vertex_faces.each do |vertex, vfaces|
+          p = vertex.position
+          if @coord_unit_disp_by_pos
+            disp_world = @coord_unit_disp_by_pos[pos_key(p.transform(xform))]
+          else
+            disp_world = nil
+          end
+          vertex_top[vertex] = if disp_world
+            # Transform the world-space unit displacement back into the
+            # group's local frame, then scale by height.
+            d = disp_world.transform(xform_inv)
+            Geom::Point3d.new(p.x + height * d.x, p.y + height * d.y, p.z + height * d.z)
+          else
+            compute_offset_vertex(p, vfaces.map(&:normal), height)
+          end
+        end
+
+        # Lift each face. Vertex order follows the bottom face's outer loop
+        # so the natural normal matches; reverse! guards against SketchUp
+        # flipping when the new face neighbours already-built geometry.
+        faces.each do |face|
+          pts = face.outer_loop.vertices.map { |v| vertex_top[v] }
+          add_top_face(ents, face, pts)
+        end
+
+        # Build walls on every boundary edge of the group — including
+        # shared seams with adjacent coordinated groups. Each group's
+        # boundary (its full perimeter, seams included) counts as the
+        # contour of one of "the two surfaces" the user wants hard.
+        boundary_seen  = {}
+        boundary_edges = []
+        faces.each do |face|
+          verts = face.outer_loop.vertices
+          n     = verts.length
+          n.times do |i|
+            v1   = verts[i]
+            v2   = verts[(i + 1) % n]
+            edge = v1.common_edge(v2)
+            next unless edge
+            next unless edge_faces[edge].size == 1
+
+            add_boundary_wall_for(ents, face, v1, v2, vertex_top, xform)
+
+            next if boundary_seen[edge]
+            boundary_seen[edge] = true
+            boundary_edges << [edge, vertex_top[v1], vertex_top[v2]]
+          end
+        end
+
+        classify_shell_edges(ents, faces, boundary_edges)
+
+        # The input faces' fronts now face into the shell (the extrusion ran
+        # in their normal direction). Flip them so the bottom skin's front
+        # points outward, matching what pushpull would have produced.
+        faces.each(&:reverse!)
+      end
+
+      SURFACE_ATTR_DICT   = 'asm_faceup_surface'.freeze
+      SURFACE_ATTR_NORMAL = 'original_normal'.freeze
+
+      # Final pass that decides each edge's soft/smooth state. Two kinds of
+      # edges are forced hard:
+      #
+      #   1. Surface contours — the bottom boundary edges (original) and
+      #      their top counterparts. These outline the shell and have to
+      #      stay visible no matter what their bottom soft flag said.
+      #   2. New non-contour edges whose two adjacent faces bend by more
+      #      than 60° (i.e. dot product of unit normals < 0.5). Below the
+      #      threshold the kink reads as a smooth crease and we soften it.
+      #
+      # Original bottom-internal edges are left untouched so the operation
+      # doesn't reach into geometry the user didn't ask to extrude.
+      def classify_shell_edges(ents, bottom_faces, boundary_edges, shared_seam_edges = [])
+        bottom_contour = {}
+        top_contour    = {}
+        boundary_edges.each do |edge, p1, p2|
+          bottom_contour[edge] = true
+          top_edge = find_edge_between(ents, p1, p2)
+          top_contour[top_edge] = true if top_edge
+        end
+
+        # Seams between coordinated surface groups follow the same > 60°
+        # rule as other internal edges: a sharp crease stays hard so the
+        # angle reads, a smooth join goes soft+smooth so the two groups
+        # blend into one shell.
+        seam_set = {}
+        shared_seam_edges.each do |edge, p1, p2, is_hard|
+          edge.soft   = !is_hard
+          edge.smooth = !is_hard
+          seam_set[edge] = true
+          top_edge = find_edge_between(ents, p1, p2)
+          if top_edge
+            top_edge.soft   = !is_hard
+            top_edge.smooth = !is_hard
+            seam_set[top_edge] = true
+          end
+        end
+
+        pre_existing = {}
+        bottom_faces.each { |f| f.edges.each { |e| pre_existing[e] = true } }
+
+        cos_threshold = 0.5  # cos(60°)
+
+        ents.grep(Sketchup::Edge).each do |e|
+          next if seam_set[e]
+          if bottom_contour[e] || top_contour[e]
+            e.soft   = false
+            e.smooth = false
+            next
+          end
+          next if pre_existing[e]
+
+          fs = e.faces
+          next if fs.size != 2
+
+          cos_a = fs[0].normal.dot(fs[1].normal)
+          cos_a =  1.0 if cos_a >  1.0
+          cos_a = -1.0 if cos_a < -1.0
+          smooth_crease = cos_a >= cos_threshold
+          e.soft   = smooth_crease
+          e.smooth = smooth_crease
+        end
+      end
+
+      # Position of a bottom vertex on the lifted surface, so the projection
+      # of (V_top − V) on each adjacent face's normal equals `height`. Each
+      # face's offset plane gives one linear constraint
+      #     n_i · V_top = n_i · V + h
+      # and `compute_offset_vertex` solves the resulting system:
+      #
+      # - N=1 → trivial: V + h·n.
+      # - N=2 → bisector closed form (exact intersection of two planes):
+      #     V_top = V + (h / (1 + n₁·n₂)) · (n₁ + n₂).
+      # - N=3 → the 3×3 system n_i·V_top = n_i·V + h is square; we solve it
+      #   by Cramer's rule (a unique intersection of three planes, exact).
+      # - N≥4 → overdetermined; we solve the normal equations
+      #     (MᵀM) v = Mᵀb
+      #   which yields the least-squares closest point to all offset planes.
+      # - Singular cases (degenerate planes, anti-parallel normals) fall
+      #   back to the averaged-normal heuristic à la Joint Push Pull.
+      def compute_offset_vertex(position, normals, height)
+        return position if normals.empty?
+        return position.offset(normals.first, height) if normals.size == 1
+
+        # Drop parallel duplicates so two coplanar neighbours don't show up
+        # as two redundant rows (which would make the 3×3 system rank
+        # deficient and force the heuristic fallback).
+        normals = dedupe_parallel_normals(normals)
+        return position.offset(normals.first, height) if normals.size == 1
+
+        if normals.size == 2
+          n1, n2 = normals
+          cos_t  = n1.dot(n2)
+          if (1.0 + cos_t).abs < 1e-9
+            return position.offset(n1, height)
+          end
+          t = height.to_f / (1.0 + cos_t)
+          return Geom::Point3d.new(
+            position.x + t * (n1.x + n2.x),
+            position.y + t * (n1.y + n2.y),
+            position.z + t * (n1.z + n2.z),
+          )
+        end
+
+        # Build the normal equations (MᵀM) v = Mᵀb. Each row of M is a
+        # face's unit normal, b_i = n_i · V + h.
+        a = Array.new(3) { Array.new(3, 0.0) }
+        c = [0.0, 0.0, 0.0]
+        vp = [position.x.to_f, position.y.to_f, position.z.to_f]
+        normals.each do |n|
+          nv    = [n.x.to_f, n.y.to_f, n.z.to_f]
+          rhs_i = nv[0] * vp[0] + nv[1] * vp[1] + nv[2] * vp[2] + height
+          3.times do |j|
+            c[j] += nv[j] * rhs_i
+            3.times { |k| a[j][k] += nv[j] * nv[k] }
+          end
+        end
+
+        result = solve_3x3(a, c)
+        return result if result
+
+        # Singular system (e.g., all normals coplanar) — fall back to the
+        # averaged-normal heuristic.
+        sum_x = sum_y = sum_z = 0.0
+        normals.each do |n|
+          sum_x += n.x
+          sum_y += n.y
+          sum_z += n.z
+        end
+        sum = Geom::Vector3d.new(sum_x, sum_y, sum_z)
+        return position.offset(normals.first, height) if sum.length < 1e-9
+
+        dir     = sum.normalize
+        avg_cos = normals.inject(0.0) { |acc, n| acc + n.dot(dir) } / normals.size
+        return position.offset(dir, height) if avg_cos.abs < 0.05
+
+        position.offset(dir, height.to_f / avg_cos)
+      end
+
+      # Collapse parallel unit vectors so the constraint set has no
+      # redundant rows. Two normals are treated as duplicates when their
+      # dot product is within 1e-9 of 1 — typical for fan-out triangulations
+      # of a planar region where several faces share the same plane.
+      def dedupe_parallel_normals(normals)
+        kept = []
+        normals.each do |n|
+          kept << n unless kept.any? { |r| r.dot(n) > 1.0 - 1e-9 }
+        end
+        kept
+      end
+
+      # Solve a 3×3 linear system A·v = b by Cramer's rule. Returns the
+      # Point3d solution, or nil if the system is singular.
+      def solve_3x3(a, b)
+        det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) -
+              a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
+              a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0])
+        return nil if det.abs < 1e-12
+
+        inv = 1.0 / det
+        x = inv * (b[0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) -
+                   b[1] * (a[0][1] * a[2][2] - a[0][2] * a[2][1]) +
+                   b[2] * (a[0][1] * a[1][2] - a[0][2] * a[1][1]))
+        y = inv * (-b[0] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
+                   b[1]  * (a[0][0] * a[2][2] - a[0][2] * a[2][0]) -
+                   b[2]  * (a[0][0] * a[1][2] - a[0][2] * a[1][0]))
+        z = inv * (b[0] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]) -
+                   b[1] * (a[0][0] * a[2][1] - a[0][1] * a[2][0]) +
+                   b[2] * (a[0][0] * a[1][1] - a[0][1] * a[1][0]))
+        Geom::Point3d.new(x, y, z)
+      end
+
+      # Build the lifted face on top. When the top vertices stay coplanar
+      # (typical for triangles and for quads on a developable surface) it's
+      # one polygon; otherwise the LSQ-solved vertex tops won't sit on a
+      # single plane, so we fan-triangulate from the first vertex. The new
+      # diagonals are left at default state — `classify_shell_edges` runs
+      # at the end and tags them based on the dihedral angle.
+      def add_top_face(ents, face, pts)
+        if pts.length <= 3 || coplanar?(pts)
+          top = ents.add_face(pts)
+          return unless top
+          top.reverse! if top.normal.dot(face.normal) < 0
+          return
+        end
+
+        (1...pts.length - 1).each do |i|
+          tri = ents.add_face(pts[0], pts[i], pts[i + 1])
+          next unless tri
+          tri.reverse! if tri.normal.dot(face.normal) < 0
+        end
+      end
+
+      def coplanar?(pts, tol = 1.0e-6)
+        return true if pts.length < 4
+        v1 = pts[1] - pts[0]
+        v2 = pts[2] - pts[0]
+        n  = v1.cross(v2)
+        return true if n.length < 1.0e-9
+        n.normalize!
+        pts[3..-1].all? { |p| (p - pts[0]).dot(n).abs < tol }
+      end
+
+      # Wall on a boundary edge with v1 → v2 in the face's CCW winding so
+      # outward = (v2 − v1) × face.normal. The quad [v1, v2, top_v2, top_v1]
+      # is CCW from outward; reverse! is belt-and-braces in case SketchUp
+      # orients it the other way to match existing geometry.
+      def add_boundary_wall_for(ents, face, v1, v2, vertex_top, xform = nil)
+        bottom_s = v1.position
+        bottom_e = v2.position
+        top_s    = vertex_top[v1]
+        top_e    = vertex_top[v2]
+        outward  = (bottom_e - bottom_s).cross(face.normal)
+        pts      = [bottom_s, bottom_e, top_e, top_s]
+        n_world  = xform ? face.normal.transform(xform) : face.normal
+        n_attr   = [n_world.x, n_world.y, n_world.z]
+
+        if coplanar?(pts)
+          wall = ents.add_face(pts)
+          return unless wall
+          wall.reverse! if wall.normal.dot(outward) < 0
+          # Stamp the wall with the source surface's normal so a later
+          # extrusion can find it by its bottom edge position. Walls live
+          # at the boundary where neighbouring surfaces meet, so this
+          # gives the cross-group lookup a second anchor besides the
+          # original-face attribute.
+          wall.set_attribute(SURFACE_ATTR_DICT, SURFACE_ATTR_NORMAL, n_attr)
+          return
+        end
+
+        tri1 = ents.add_face(bottom_s, bottom_e, top_e)
+        tri2 = ents.add_face(bottom_s, top_e,    top_s)
+        [tri1, tri2].each do |tri|
+          next unless tri
+          tri.reverse! if tri.normal.dot(outward) < 0
+          tri.set_attribute(SURFACE_ATTR_DICT, SURFACE_ATTR_NORMAL, n_attr)
+        end
+      end
+
+      def find_edge_between(ents, p1, p2)
+        ents.grep(Sketchup::Edge).find do |e|
+          (e.start.position == p1 && e.end.position == p2) ||
+            (e.start.position == p2 && e.end.position == p1)
         end
       end
 
@@ -684,7 +1624,7 @@ module ASM_Extensions
       end
 
       def update_vcb(label = nil, value = nil)
-        label ||= Lang.t(:tools, :extruder, :vcb_label)
+        label ||= Lang.t(:tools, :faceup, :vcb_label)
         value ||= @extrusion_distance.to_s
 
         @current_vcb_label = label
@@ -724,6 +1664,7 @@ module ASM_Extensions
         arrow_right: 39,
         arrow_up:    38,
         shift:       16,  # VK_SHIFT / CONSTRAIN_MODIFIER_KEY on Windows
+        ctrl:        17,  # VK_CONTROL on Windows
       }.freeze
 
       CIRCLE_SEGMENTS = 16
@@ -877,7 +1818,7 @@ module ASM_Extensions
         (@flip_direction ? -vec.length : vec.length).to_l
       end
 
-    end # class ExtruderTool
+    end # class FaceUpTool
 
     ### TURBO TOOL ### ------------------------------------------------------------
 
@@ -885,7 +1826,7 @@ module ASM_Extensions
 
       def self.turbo
         return unless ASM_Extensions::FaceUp.summon_faces
-        Sketchup.active_model.select_tool(ExtruderTool.new)
+        Sketchup.active_model.select_tool(FaceUpTool.new)
       end
 
     end # class TurboTool

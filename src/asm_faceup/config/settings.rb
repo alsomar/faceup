@@ -6,7 +6,7 @@ module ASM_Extensions
       language: "auto",
       context_menu: false,
 
-      # Extruder Options
+      # FaceUp Options
       use_last_extrusion:      true,
       default_extrusion:       0,
       align_to_min_bb:         false,

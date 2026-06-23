@@ -4,7 +4,7 @@ require 'testup/testcase'
 
 module ASM_Extensions
   module FaceUp
-    class TC_extruder < TestUp::TestCase
+    class TC_faceup < TestUp::TestCase
 
       # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -16,69 +16,69 @@ module ASM_Extensions
 
       def setup
         Sketchup.require 'asm_faceup/ops/tools'
-        # Instantiating ExtruderTool calls initialize, which reads CONFIG and
+        # Instantiating FaceUpTool calls initialize, which reads CONFIG and
         # the active model attribute — both available in the TestUp environment.
-        @tool = ExtruderTool.new
+        @tool = FaceUpTool.new
       end
 
       # ── KEYS constant ─────────────────────────────────────────────────────
 
       def test_keys_esc_is_27
-        assert_equal 27, ExtruderTool::KEYS[:esc]
+        assert_equal 27, FaceUpTool::KEYS[:esc]
       end
 
       def test_keys_tab_is_9
-        assert_equal 9, ExtruderTool::KEYS[:tab]
+        assert_equal 9, FaceUpTool::KEYS[:tab]
       end
 
       def test_keys_arrow_left_is_37
-        assert_equal 37, ExtruderTool::KEYS[:arrow_left]
+        assert_equal 37, FaceUpTool::KEYS[:arrow_left]
       end
 
       def test_keys_arrow_right_is_39
-        assert_equal 39, ExtruderTool::KEYS[:arrow_right]
+        assert_equal 39, FaceUpTool::KEYS[:arrow_right]
       end
 
       def test_keys_arrow_up_is_38
-        assert_equal 38, ExtruderTool::KEYS[:arrow_up]
+        assert_equal 38, FaceUpTool::KEYS[:arrow_up]
       end
 
       def test_keys_is_frozen
-        assert ExtruderTool::KEYS.frozen?
+        assert FaceUpTool::KEYS.frozen?
       end
 
       # ── UNIT_SUFFIXES constant ────────────────────────────────────────────
 
       def test_unit_suffixes_mm
-        assert_equal 'mm', ExtruderTool::UNIT_SUFFIXES['mm']
+        assert_equal 'mm', FaceUpTool::UNIT_SUFFIXES['mm']
       end
 
       def test_unit_suffixes_cm
-        assert_equal 'cm', ExtruderTool::UNIT_SUFFIXES['cm']
+        assert_equal 'cm', FaceUpTool::UNIT_SUFFIXES['cm']
       end
 
       def test_unit_suffixes_m
-        assert_equal 'm', ExtruderTool::UNIT_SUFFIXES['m']
+        assert_equal 'm', FaceUpTool::UNIT_SUFFIXES['m']
       end
 
       def test_unit_suffixes_inch
-        assert_equal '"', ExtruderTool::UNIT_SUFFIXES['inch']
+        assert_equal '"', FaceUpTool::UNIT_SUFFIXES['inch']
       end
 
       def test_unit_suffixes_feet
-        assert_equal "'", ExtruderTool::UNIT_SUFFIXES['feet']
+        assert_equal "'", FaceUpTool::UNIT_SUFFIXES['feet']
       end
 
       def test_unit_suffixes_yard
-        assert_equal 'yd', ExtruderTool::UNIT_SUFFIXES['yard']
+        assert_equal 'yd', FaceUpTool::UNIT_SUFFIXES['yard']
       end
 
       def test_unit_suffixes_model_is_nil
-        assert_nil ExtruderTool::UNIT_SUFFIXES['model']
+        assert_nil FaceUpTool::UNIT_SUFFIXES['model']
       end
 
       def test_unit_suffixes_is_frozen
-        assert ExtruderTool::UNIT_SUFFIXES.frozen?
+        assert FaceUpTool::UNIT_SUFFIXES.frozen?
       end
 
       # ── default_extrusion_to_length ───────────────────────────────────────
@@ -170,7 +170,7 @@ module ASM_Extensions
 
       def test_inference_color_vertex_snap
         ip = FakeIP.new(Object.new, nil, nil, Geom::Point3d.new(0, 0, 0))
-        assert_equal ExtruderTool::INFERENCE_COLORS[:vertex],
+        assert_equal FaceUpTool::INFERENCE_COLORS[:vertex],
                      @tool.send(:inference_color, ip)
       end
 
@@ -182,7 +182,7 @@ module ASM_Extensions
         edge = FakeEdge.new(FakeEndpoint.new(p1), FakeEndpoint.new(p2))
         ip   = FakeIP.new(nil, edge, nil, mid)
 
-        assert_equal ExtruderTool::INFERENCE_COLORS[:midpoint],
+        assert_equal FaceUpTool::INFERENCE_COLORS[:midpoint],
                      @tool.send(:inference_color, ip)
       end
 
@@ -194,19 +194,19 @@ module ASM_Extensions
         edge = FakeEdge.new(FakeEndpoint.new(p1), FakeEndpoint.new(p2))
         ip   = FakeIP.new(nil, edge, nil, off)
 
-        assert_equal ExtruderTool::INFERENCE_COLORS[:edge],
+        assert_equal FaceUpTool::INFERENCE_COLORS[:edge],
                      @tool.send(:inference_color, ip)
       end
 
       def test_inference_color_face_snap
         ip = FakeIP.new(nil, nil, Object.new, Geom::Point3d.new(1, 1, 0))
-        assert_equal ExtruderTool::INFERENCE_COLORS[:face],
+        assert_equal FaceUpTool::INFERENCE_COLORS[:face],
                      @tool.send(:inference_color, ip)
       end
 
       def test_inference_color_free_point
         ip = FakeIP.new(nil, nil, nil, Geom::Point3d.new(5, 5, 5))
-        assert_equal ExtruderTool::INFERENCE_COLORS[:none],
+        assert_equal FaceUpTool::INFERENCE_COLORS[:none],
                      @tool.send(:inference_color, ip)
       end
 

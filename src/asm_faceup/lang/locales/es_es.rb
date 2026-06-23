@@ -9,15 +9,20 @@ module ASM_Extensions
               tooltip: "Invocar Caras",
               status:  "Genera caras para las aristas seleccionadas y las orienta hacia arriba."
             },
-            extruder: {
-              label:   "Extrusor",
-              tooltip: "Extrusor",
+            faceup: {
+              label:   "FaceUp",
+              tooltip: "FaceUp",
               status:  "Genera volúmenes sólidos a partir de caras seleccionadas usando una longitud definida por el usuario."
             },
+            surfaceup: {
+              label:   "SurfaceUp",
+              tooltip: "SurfaceUp (experimental)",
+              status:  "Extruye las caras seleccionadas como superficies soldadas — las caras adyacentes quedan fusionadas por sus aristas suaves."
+            },
             turbo: {
-              label:   "Invocar + Extrusor",
-              tooltip: "Invocar + Extrusor",
-              status:  "Ejecuta Invocar Caras seguido de Extrusor."
+              label:   "Invocar + FaceUp",
+              tooltip: "Invocar + FaceUp",
+              status:  "Ejecuta Invocar Caras seguido de FaceUp."
             },
             settings: {
               label:   "Ajustes de #{EXT_NAME}",
@@ -32,7 +37,7 @@ module ASM_Extensions
               tooltip:            "Ajustes",
               dark_mode_tooltip:  "Cambiar a modo claro",
               light_mode_tooltip: "Cambiar a modo oscuro",
-              extruder_options:       "Opciones del extrusor",
+              faceup_options:         "Opciones de FaceUp",
               use_last_extrusion:     "Usar última extrusión como valor inicial",
               default_extrusion:      "Valor inicial",
               reset_value:            "Restablecer valor por defecto",
@@ -75,11 +80,11 @@ module ASM_Extensions
               no_edges:     "Por favor, selecciona algunas aristas.",
               no_selection: "No hay nada seleccionado.",
             },
-            extruder: {
+            faceup: {
               vcb_label:      "Longitud: ",
-              status_idle:    "Extrusor: Introduce una distancia o haz clic para fijar el origen | Tab para invertir | Enter/DblClic para confirmar | Espacio para cancelar",
-              status_pick:    "Extrusor: Haz clic para fijar la distancia | Tab para invertir | ESC para restablecer el origen | Espacio para cancelar",
-              status_adjust:  "Extrusor: Haz clic para ajustar | Tab para invertir | Enter/DblClic para confirmar | ESC para restablecer el origen | Espacio para cancelar",
+              status_idle:    "FaceUp: Introduce una distancia o haz clic para fijar el origen | Tab para invertir | Enter/DblClic para confirmar | Espacio para cancelar",
+              status_pick:    "FaceUp: Haz clic para fijar la distancia | Tab para invertir | ESC para restablecer el origen | Espacio para cancelar",
+              status_adjust:  "FaceUp: Haz clic para ajustar | Tab para invertir | Enter/DblClic para confirmar | ESC para restablecer el origen | Espacio para cancelar",
               status_flipped: " [INVERTIDO]",
               no_faces:       "No hay caras seleccionadas.",
               invalid_length: "Longitud no válida. Introduce una distancia correcta.",

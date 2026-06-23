@@ -9,15 +9,20 @@ module ASM_Extensions
               tooltip: "Summon Faces",
               status:  "Generates faces for selected edges and orients them to face up."
             },
-            extruder: {
-              label:   "Extruder",
-              tooltip: "Extruder",
+            faceup: {
+              label:   "FaceUp",
+              tooltip: "FaceUp",
               status:  "Generates solid volumes from selected faces using a user-defined length."
             },
+            surfaceup: {
+              label:   "SurfaceUp",
+              tooltip: "SurfaceUp (experimental)",
+              status:  "Extrudes selected faces as welded surfaces — adjacent faces stay fused along their soft edges."
+            },
             turbo: {
-              label:   "Summon + Extruder",
-              tooltip: "Summon + Extruder",
-              status:  "Runs Summon Faces followed by Extruder."
+              label:   "Summon + FaceUp",
+              tooltip: "Summon + FaceUp",
+              status:  "Runs Summon Faces followed by FaceUp."
             },
             settings: {
               label:   "#{EXT_NAME} Settings",
@@ -32,7 +37,7 @@ module ASM_Extensions
               tooltip:            "Settings",
               dark_mode_tooltip:  "Switch to light mode",
               light_mode_tooltip: "Switch to dark mode",
-              extruder_options:       "Extruder Options",
+              faceup_options:         "FaceUp Options",
               use_last_extrusion:     "Use last extrusion as initial value",
               default_extrusion:      "Initial value",
               reset_value:            "Reset to default value",
@@ -75,11 +80,11 @@ module ASM_Extensions
               no_edges:     "Please select some edges.",
               no_selection: "There's nothing selected.",
             },
-            extruder: {
+            faceup: {
               vcb_label:      "Length: ",
-              status_idle:    "Extruder: Enter distance or click to set origin | Tab to flip direction | Enter/DblClick to confirm | Space to cancel",
-              status_pick:    "Extruder: Click to set distance | Tab to flip direction | ESC to reset origin | Space to cancel",
-              status_adjust:  "Extruder: Click to adjust | Tab to flip direction | Enter/DblClick to confirm | ESC to reset origin | Space to cancel",
+              status_idle:    "FaceUp: Enter distance or click to set origin | Tab to flip direction | Enter/DblClick to confirm | Space to cancel",
+              status_pick:    "FaceUp: Click to set distance | Tab to flip direction | ESC to reset origin | Space to cancel",
+              status_adjust:  "FaceUp: Click to adjust | Tab to flip direction | Enter/DblClick to confirm | ESC to reset origin | Space to cancel",
               status_flipped: " [FLIPPED]",
               no_faces:       "No faces selected.",
               invalid_length: "Invalid length. Please enter a valid distance.",
