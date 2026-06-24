@@ -225,13 +225,27 @@ module ASM_Extensions
         @preview_cache = if @mode == :surface
           build_surface_preview_cache(@selected_faces)
         else
+          repair = CONFIG[:repair_edges_before]
           @selected_faces.map do |face|
             mesh = face.mesh(7)
+            verts = face.outer_loop.vertices
+            edges = face.outer_loop.edges
+            kept  = repair ? simplifiable_kept_indices(verts, edges) : (0...verts.length).to_a
+            kept_pts = kept.map { |i| verts[i].position }
+            hard_edges = []
+            kept.length.times do |k|
+              # The edge starting at `verts[kept[k]]` represents the run
+              # of collinear edges between this kept vertex and the next.
+              e = edges[kept[k]]
+              next if e.soft? || e.curve
+              i_next = kept[(k + 1) % kept.length]
+              hard_edges << [verts[kept[k]].position, verts[i_next].position]
+            end
             {
               normal:     face.normal,
               tris:       mesh.polygons.map { |tri| tri.map { |i| mesh.point_at(i.abs) } },
-              loop_pts:   face.outer_loop.vertices.map(&:position),
-              hard_edges: face.outer_loop.edges.reject { |e| e.soft? || e.curve }.map { |e| [e.start.position, e.end.position] },
+              loop_pts:   kept_pts,
+              hard_edges: hard_edges,
             }
           end
         end
@@ -582,7 +596,6 @@ module ASM_Extensions
         @operation_open = true
 
         begin
-          faces_to_extrude = repair_split_edges(faces_to_extrude) if CONFIG[:repair_edges_before]
           groups = face2group(faces_to_extrude)
           xtrd_groups(groups, @extrusion_distance)
           model.selection.add(groups)
@@ -1190,53 +1203,40 @@ module ASM_Extensions
         (a <=> b) <= 0 ? [a, b] : [b, a]
       end
 
-      # Pre-extrusion mesh cleanup. Each vertex shared by exactly two
-      # collinear edges is redundant — the two segments are really one.
-      # Rather than rebuilding adjacent faces by hand, we let SketchUp's
-      # geometry healing do the work: adding a throwaway edge from the
-      # redundant vertex and erasing it immediately triggers the merge.
+      # In-memory perimeter simplification. For each face, returns the
+      # indices of its outer-loop vertices that should drive the wall and
+      # top construction. A vertex is dropped when both of its incident
+      # outer-loop edges are perimeter edges of the group (no neighbouring
+      # in-group face on the other side) and the two edges are collinear.
+      # The dropped vertex becomes a welded mid-point on the new long
+      # wall, leaving the source mesh untouched while the resulting shell
+      # has no spurious verticals/top subdivisions at colinear bumps.
       #
-      # The healing can replace adjacent faces with fresh ones, so we
-      # tag the input faces with a marker attribute before touching the
-      # geometry and re-collect the live faces by attribute on the way
-      # out. Returns the refreshed face array.
-      #
-      # Based on TT::Edges.repair_splits by Thomas Thomassen (MIT, 2014)
-      # — see https://github.com/thomthom/tt-library-2/.
-      REPAIR_ATTR_DICT = 'asm_faceup_repair'.freeze
-      REPAIR_ATTR_KEY  = 'in_selection'.freeze
-
-      def repair_split_edges(faces)
-        ents = Sketchup.active_model.active_entities
-        faces.each { |f| f.set_attribute(REPAIR_ATTR_DICT, REPAIR_ATTR_KEY, true) if f.valid? }
-        vertices = faces.flat_map { |f| f.valid? ? f.outer_loop.vertices : [] }.uniq
-
-        # Add all temp edges with a generous random remote offset (large
-        # enough to land outside any face that touches the vertex), then
-        # erase them all in one batch. SketchUp's geometry healing kicks
-        # in on the batched erase and collapses each pair of collinear
-        # edges that share a now-redundant vertex.
-        temp_edges = []
-        vertices.each do |v|
-          next unless v.valid?
-          edges = v.edges
-          next unless edges.size == 2
-          d1 = edges[0].line[1]
-          d2 = edges[1].line[1]
-          next unless d1.parallel?(d2)
-          remote = Geom::Point3d.new(
-            v.position.x + rand(1000) / 100.0,
-            v.position.y + rand(1000) / 100.0,
-            v.position.z + rand(1000) / 100.0,
-          )
-          edge = ents.add_line(v.position, remote)
-          temp_edges << edge if edge
+      # When `simplify` is false, every face returns its full index range
+      # so callers can rely on the same shape regardless of the setting.
+      def compute_active_outer_loop_indices(faces, edge_faces, simplify)
+        result = {}
+        faces.each do |face|
+          verts = face.outer_loop.vertices
+          edges = face.outer_loop.edges
+          n     = verts.length
+          if !simplify || n < 3
+            result[face] = (0...n).to_a
+            next
+          end
+          keep = Array.new(n, true)
+          n.times do |i|
+            e_prev = edges[(i - 1) % n]   # edge ending at verts[i]
+            e_next = edges[i]             # edge starting at verts[i]
+            next unless edge_faces[e_prev] && edge_faces[e_next]
+            next unless edge_faces[e_prev].size == 1 && edge_faces[e_next].size == 1
+            next unless e_prev.line[1].parallel?(e_next.line[1])
+            keep[i] = false
+          end
+          active = (0...n).select { |i| keep[i] }
+          result[face] = active.empty? ? (0...n).to_a : active
         end
-        ents.erase_entities(temp_edges) unless temp_edges.empty?
-
-        fresh = ents.grep(Sketchup::Face).select { |f| f.get_attribute(REPAIR_ATTR_DICT, REPAIR_ATTR_KEY) }
-        fresh.each { |f| f.delete_attribute(REPAIR_ATTR_DICT, REPAIR_ATTR_KEY) }
-        fresh
+        result
       end
 
       # Flood-fill `faces` through soft edges only. Faces not in the input
@@ -1281,6 +1281,7 @@ module ASM_Extensions
       def xtrd_groups_per_face(groups, height)
         default_layer = Sketchup.active_model.layers[0]
         align         = CONFIG[:align_to_min_bb]
+        repair        = CONFIG[:repair_edges_before]
 
         groups.each do |group|
           entities = group.entities.to_a
@@ -1291,11 +1292,66 @@ module ASM_Extensions
 
           next unless faces.first
 
+          # If the user asked for it, drop collinear outer-loop vertices
+          # before pushpulling — same intent as in SurfaceUp, but here the
+          # rebuild happens inside the per-face group so the user's source
+          # mesh stays untouched.
+          if repair
+            rebuilt = simplify_outer_loop_in_group(group, faces.first)
+            faces = group.entities.grep(Sketchup::Face) if rebuilt
+            next unless faces.first
+          end
+
           # The profile normal (before pushpull) is the extrusion axis.
           normal = faces.first.normal
           faces.first.pushpull(height)
           apply_min_bb_alignment(group, normal) if align
         end
+      end
+
+      # In-group perimeter cleanup for face mode. Drops outer-loop
+      # vertices whose two incident edges are collinear, then rebuilds
+      # the face from the kept positions. Skips faces with inner loops
+      # — preserving holes through a full erase/recreate is more work
+      # than it's worth here and the user can still simplify by hand.
+      # Returns true when the face was rebuilt, false otherwise.
+      def simplify_outer_loop_in_group(group, face)
+        return false if face.loops.size > 1
+        verts = face.outer_loop.vertices
+        edges = face.outer_loop.edges
+        kept  = simplifiable_kept_indices(verts, edges)
+        return false if kept.length == verts.length
+
+        kept_pts = kept.map { |i| verts[i].position }
+        return false if kept_pts.size < 3
+
+        original_normal = face.normal
+        ents = group.entities
+        ents.erase_entities([face, *face.outer_loop.edges])
+
+        new_face = ents.add_face(kept_pts)
+        return false unless new_face
+        new_face.reverse! if new_face.normal.dot(original_normal) < 0
+        true
+      end
+
+      # Indices of outer-loop vertices to retain when collapsing runs of
+      # collinear edges. A vertex sandwiched between two parallel outer
+      # edges sits on the straight run; we drop it. Triangles (n < 4)
+      # have nothing to collapse; if every vertex would be dropped (a
+      # full straight loop, which shouldn't happen) we bail out with the
+      # full index range.
+      def simplifiable_kept_indices(verts, edges)
+        n = verts.length
+        return (0...n).to_a if n < 4
+        keep = Array.new(n, true)
+        n.times do |i|
+          e_prev = edges[(i - 1) % n]
+          e_next = edges[i]
+          keep[i] = false if e_prev.line[1].parallel?(e_next.line[1])
+        end
+        kept = (0...n).select { |i| keep[i] }
+        kept.size < 3 ? (0...n).to_a : kept
       end
 
       # Welded extrusion. Each face is lifted along its own normal, but
@@ -1386,11 +1442,21 @@ module ASM_Extensions
           vertex_top[vertex] = Geom::Point3d.new(p.x + height * d.x, p.y + height * d.y, p.z + height * d.z)
         end
 
+        # When the user opts in, drop perimeter vertices whose two
+        # neighbouring outer-loop edges are both perimeter edges of the
+        # group AND collinear with each other. The wall/top geometry then
+        # spans the simplified outer loop, while the source mesh stays
+        # untouched. SketchUp auto-welds the dropped vertex onto the new
+        # wall's bottom edge, so manifolding still holds.
+        active_indices = compute_active_outer_loop_indices(faces, edge_faces, CONFIG[:repair_edges_before])
+
         # Lift each face. Vertex order follows the bottom face's outer loop
         # so the natural normal matches; reverse! guards against SketchUp
         # flipping when the new face neighbours already-built geometry.
         faces.each do |face|
-          pts = face.outer_loop.vertices.map { |v| vertex_top[v] }
+          verts = face.outer_loop.vertices
+          idx   = active_indices[face]
+          pts   = idx.map { |i| vertex_top[verts[i]] }
           add_top_face(ents, face, pts, height)
         end
 
@@ -1402,19 +1468,37 @@ module ASM_Extensions
         boundary_edges = []
         faces.each do |face|
           verts = face.outer_loop.vertices
-          n     = verts.length
-          n.times do |i|
-            v1   = verts[i]
-            v2   = verts[(i + 1) % n]
+          idx   = active_indices[face]
+          n     = idx.length
+          n.times do |k|
+            v1 = verts[idx[k]]
+            v2 = verts[idx[(k + 1) % n]]
             edge = v1.common_edge(v2)
-            next unless edge
-            next unless edge_faces[edge].size == 1
 
-            add_boundary_wall_for(ents, face, v1, v2, vertex_top, xform)
+            if edge
+              next unless edge_faces[edge].size == 1
+              add_boundary_wall_for(ents, face, v1, v2, vertex_top, xform)
+              next if boundary_seen[edge]
+              boundary_seen[edge] = true
+              boundary_edges << [edge, vertex_top[v1], vertex_top[v2]]
+            else
+              # Simplified span: no direct Edge object between v1 and v2.
+              # Build the wall on the long span anyway — SketchUp welds
+              # the intermediate source vertices into the new wall face's
+              # outer loop so the bottom face stays manifold.
+              add_boundary_wall_for(ents, face, v1, v2, vertex_top, xform)
+            end
+          end
+        end
 
-            next if boundary_seen[edge]
-            boundary_seen[edge] = true
-            boundary_edges << [edge, vertex_top[v1], vertex_top[v2]]
+        # If the source carries QuadFaceTools divider edges, propagate
+        # each one to its top counterpart so the lifted skin keeps the
+        # same quad pairing the user had in the source.
+        faces.each do |face|
+          face.edges.each do |e|
+            next unless e.soft? && e.smooth? && !e.casts_shadows?
+            top_edge = find_edge_between(ents, vertex_top[e.start], vertex_top[e.end])
+            mark_quad_divider(top_edge) if top_edge
           end
         end
 
@@ -1509,6 +1593,10 @@ module ASM_Extensions
 
         ents.grep(Sketchup::Edge).each do |e|
           next if seam_set[e]
+          # Skip edges already tagged as QFT dividers (triangulation
+          # diagonals marked at construction time, and top counterparts
+          # of source dividers).
+          next if e.soft? && e.smooth? && !e.casts_shadows?
           if bottom_contour[e] || top_contour[e]
             e.soft   = false
             e.smooth = false
@@ -1525,6 +1613,12 @@ module ASM_Extensions
           smooth_crease = cos_a >= cos_threshold
           e.soft   = smooth_crease
           e.smooth = smooth_crease
+          # We deliberately don't touch `casts_shadows` here: a plain
+          # soft+smooth edge gives the user smooth shading without
+          # tripping QuadFaceTools, which only counts an edge as a quad
+          # divider when *all three* properties (soft + smooth +
+          # !casts_shadows) hold. Dividers are set by `mark_quad_divider`
+          # at creation time and skipped above.
         end
       end
 
@@ -1677,13 +1771,27 @@ module ASM_Extensions
           return
         end
 
-        (1...pts.length - 1).each do |i|
+        last_i = pts.length - 2
+        (1..last_i).each do |i|
           tri_pts = [pts[0], pts[i], pts[i + 1]]
           next if tri_pts[0] == tri_pts[1] || tri_pts[1] == tri_pts[2] || tri_pts[0] == tri_pts[2]
           tri = ents.add_face(tri_pts)
           next unless tri
           orient.call(tri)
+          # The shared edge with the *next* fan triangle is the diagonal;
+          # on the last iteration that edge is actually the polygon's
+          # closing perimeter, so we skip it.
+          next if i == last_i
+          diag = find_edge_between(ents, tri_pts[0], tri_pts[2])
+          mark_quad_divider(diag) if diag
         end
+      end
+
+      def mark_quad_divider(edge)
+        return unless edge
+        edge.soft           = true
+        edge.smooth         = true
+        edge.casts_shadows  = false
       end
 
       def dedupe_consecutive_points(pts)
@@ -1735,6 +1843,9 @@ module ASM_Extensions
 
         tri1 = ents.add_face(pts[0], pts[1], pts[2])
         tri2 = ents.add_face(pts[0], pts[2], pts[3])
+        # Wall fan-triangulation diagonal — tag as a QFT divider.
+        diag = find_edge_between(ents, pts[0], pts[2])
+        mark_quad_divider(diag) if diag
         [tri1, tri2].each do |tri|
           next unless tri
           tri.reverse! if tri.normal.dot(outward) < 0
