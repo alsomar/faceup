@@ -6,6 +6,7 @@ window.onExtensionSettings = function(config) {
   window.app.settingsDefaultExtrusion     = String(config.default_extrusion != null ? config.default_extrusion : '0');
   window.app.settingsModelUnit            = config.model_unit || '';
   window.app.settingsAlignBoundingBox     = !!config.align_to_min_bb;
+  window.app.settingsRepairEdgesBefore    = !!config.repair_edges_before;
 };
 
 // Live push of the active model's length unit — used when units change while

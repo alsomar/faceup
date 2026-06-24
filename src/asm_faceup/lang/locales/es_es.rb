@@ -42,6 +42,7 @@ module ASM_Extensions
               default_extrusion:      "Valor inicial",
               reset_value:            "Restablecer valor por defecto",
               align_to_min_bb:        "Auto-orientar caja envolvente",
+              repair_edges_before:    "Reparar aristas antes de extruir",
               general_options:        "Opciones generales",
               language_selection: "Selección de idioma",
               language_hint:      "Puede ser necesario reiniciar SketchUp para aplicar los ajustes de idioma.",

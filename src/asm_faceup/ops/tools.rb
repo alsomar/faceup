@@ -582,6 +582,7 @@ module ASM_Extensions
         @operation_open = true
 
         begin
+          faces_to_extrude = repair_split_edges(faces_to_extrude) if CONFIG[:repair_edges_before]
           groups = face2group(faces_to_extrude)
           xtrd_groups(groups, @extrusion_distance)
           model.selection.add(groups)
@@ -1179,6 +1180,55 @@ module ASM_Extensions
         a = pos_key(p1)
         b = pos_key(p2)
         (a <=> b) <= 0 ? [a, b] : [b, a]
+      end
+
+      # Pre-extrusion mesh cleanup. Each vertex shared by exactly two
+      # collinear edges is redundant — the two segments are really one.
+      # Rather than rebuilding adjacent faces by hand, we let SketchUp's
+      # geometry healing do the work: adding a throwaway edge from the
+      # redundant vertex and erasing it immediately triggers the merge.
+      #
+      # The healing can replace adjacent faces with fresh ones, so we
+      # tag the input faces with a marker attribute before touching the
+      # geometry and re-collect the live faces by attribute on the way
+      # out. Returns the refreshed face array.
+      #
+      # Based on TT::Edges.repair_splits by Thomas Thomassen (MIT, 2014)
+      # — see https://github.com/thomthom/tt-library-2/.
+      REPAIR_ATTR_DICT = 'asm_faceup_repair'.freeze
+      REPAIR_ATTR_KEY  = 'in_selection'.freeze
+
+      def repair_split_edges(faces)
+        ents = Sketchup.active_model.active_entities
+        faces.each { |f| f.set_attribute(REPAIR_ATTR_DICT, REPAIR_ATTR_KEY, true) if f.valid? }
+        vertices = faces.flat_map { |f| f.valid? ? f.outer_loop.vertices : [] }.uniq
+
+        # Add all temp edges with a generous random remote offset (large
+        # enough to land outside any face that touches the vertex), then
+        # erase them all in one batch. SketchUp's geometry healing kicks
+        # in on the batched erase and collapses each pair of collinear
+        # edges that share a now-redundant vertex.
+        temp_edges = []
+        vertices.each do |v|
+          next unless v.valid?
+          edges = v.edges
+          next unless edges.size == 2
+          d1 = edges[0].line[1]
+          d2 = edges[1].line[1]
+          next unless d1.parallel?(d2)
+          remote = Geom::Point3d.new(
+            v.position.x + rand(1000) / 100.0,
+            v.position.y + rand(1000) / 100.0,
+            v.position.z + rand(1000) / 100.0,
+          )
+          edge = ents.add_line(v.position, remote)
+          temp_edges << edge if edge
+        end
+        ents.erase_entities(temp_edges) unless temp_edges.empty?
+
+        fresh = ents.grep(Sketchup::Face).select { |f| f.get_attribute(REPAIR_ATTR_DICT, REPAIR_ATTR_KEY) }
+        fresh.each { |f| f.delete_attribute(REPAIR_ATTR_DICT, REPAIR_ATTR_KEY) }
+        fresh
       end
 
       # Flood-fill `faces` through soft edges only. Faces not in the input
