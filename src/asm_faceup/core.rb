@@ -65,10 +65,10 @@ module ASM_Extensions
 
       # Menu
       menu = UI.menu('Extensions').add_submenu(EXT_NAME)
-      menu.add_item(cmd_summonfaces)
       menu.add_item(cmd_faceup)
       menu.add_item(cmd_surfaceup)
       menu.add_separator
+      menu.add_item(cmd_summonfaces)
       menu.add_item(cmd_turbo)
       menu.add_separator
       menu.add_item(cmd_settings)
@@ -78,19 +78,19 @@ module ASM_Extensions
         next unless CONFIG[:context_menu]
         menu = context_menu.add_submenu(EXT_NAME)
         menu.add_separator
-        menu.add_item(cmd_summonfaces)
         menu.add_item(cmd_faceup)
         menu.add_item(cmd_surfaceup)
         menu.add_separator
+        menu.add_item(cmd_summonfaces)
         menu.add_item(cmd_turbo)
       end
 
       # Toolbar
       toolbar = UI::Toolbar.new(EXT_NAME)
-      toolbar.add_item(cmd_summonfaces)
       toolbar.add_item(cmd_faceup)
       toolbar.add_item(cmd_surfaceup)
       toolbar.add_separator
+      toolbar.add_item(cmd_summonfaces)
       toolbar.add_item(cmd_turbo)
       toolbar.add_separator
       toolbar.add_item(cmd_settings)

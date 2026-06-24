@@ -20,8 +20,8 @@ module ASM_Extensions
               status:  "Extrudes selected faces as welded surfaces — adjacent faces stay fused along their soft edges."
             },
             turbo: {
-              label:   "Summon + FaceUp",
-              tooltip: "Summon + FaceUp",
+              label:   "FaceUp Express",
+              tooltip: "FaceUp Express",
               status:  "Runs Summon Faces followed by FaceUp."
             },
             settings: {

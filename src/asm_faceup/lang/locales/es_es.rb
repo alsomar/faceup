@@ -20,8 +20,8 @@ module ASM_Extensions
               status:  "Extruye las caras seleccionadas como superficies soldadas — las caras adyacentes quedan fusionadas por sus aristas suaves."
             },
             turbo: {
-              label:   "Invocar + FaceUp",
-              tooltip: "Invocar + FaceUp",
+              label:   "FaceUp Express",
+              tooltip: "FaceUp Express",
               status:  "Ejecuta Invocar Caras seguido de FaceUp."
             },
             settings: {
