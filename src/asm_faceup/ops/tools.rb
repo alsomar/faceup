@@ -386,7 +386,10 @@ module ASM_Extensions
           end
         when KEYS[:tab]
           @flip_direction    = !@flip_direction
-          @extrusion_distance = -@extrusion_distance
+          # `-Length` collapses to a raw Float, which would then `.to_s`
+          # in inches and break the VCB display. Coerce back to Length so
+          # SketchUp formats it in the model's display units.
+          @extrusion_distance = (-@extrusion_distance).to_l
           update_vcb(nil, @extrusion_distance.to_s)
           update_status_text
           view.invalidate
@@ -693,7 +696,7 @@ module ASM_Extensions
       # the final result (top is an equidistant surface, walls only on the
       # surface boundary, internal soft edges disappear into the skin).
       def draw_surface_extrusion_preview(view)
-        dist = @extrusion_distance
+        raw_dist = @extrusion_distance
         gray_tris      = []
         gray_quads     = []
         gray_extras    = []   # fan-triangulated walls when the quad isn't planar
@@ -706,6 +709,11 @@ module ASM_Extensions
         @preview_cache.each do |group|
           vert_disp = group[:vert_disp]
           vert_pos  = group[:vert_pos]
+          # Same flip-clamp the executed extrusion uses, so the preview
+          # matches the result instead of running past the safe range.
+          dist = raw_dist
+          dist = group[:max_safe_h] if group[:max_safe_h] && dist > group[:max_safe_h]
+          dist = group[:min_safe_h] if group[:min_safe_h] && dist < group[:min_safe_h]
 
           group[:tris].each do |tri|
             bottom = tri.map { |meta| surface_meta_bottom(meta) }
@@ -723,24 +731,16 @@ module ASM_Extensions
             if coplanar?(quad)
               gray_quads.concat(quad)
             else
-              # Fan-triangulate the twisted wall.
               gray_extras.concat([bs, be, te, bs, te, ts])
             end
           end
 
-          # Verticals at corners whose two walls bend >60° between each
-          # other are predicted hard (the final classifier applies the
-          # same rule to the constructed geometry).
           group[:hard_corner_verts].each_key do |corner|
             bs = vert_pos[corner]
             ts = surface_top_pt(corner, vert_disp, vert_pos, dist)
             hard_corner_lines.concat([bs, ts])
           end
 
-          # Internal hard top/bottom edges — the welded surface has a
-          # visible crease wherever two soft-connected faces bend > 60°.
-          # These run through the middle of the mesh fill, so we draw them
-          # in screen space to guarantee visibility.
           group[:hard_internal_edges].each do |v1, v2|
             bs = vert_pos[v1]
             be = vert_pos[v2]
@@ -921,6 +921,11 @@ module ASM_Extensions
         # catches seam-vs-perimeter junctions naturally.
         hard_corner_verts = predict_hard_corner_verticals(boundary, vert_disp)
 
+        # Same flip-prevention range as the executed extrusion — the
+        # preview clamps the cursor distance against it so what the user
+        # sees matches what they'll get.
+        min_h, max_h = clamp_range_for_faces(gfaces, vert_disp)
+
         {
           vert_pos:            vert_pos,
           vert_disp:           vert_disp,
@@ -928,7 +933,39 @@ module ASM_Extensions
           boundary:            boundary,
           hard_corner_verts:   hard_corner_verts,
           hard_internal_edges: hard_internal_edges,
+          min_safe_h:          min_h,
+          max_safe_h:          max_h,
         }
+      end
+
+      def clamp_range_for_faces(gfaces, vert_disp)
+        min_h = nil
+        max_h = nil
+        seen  = {}
+        gfaces.each do |face|
+          face.edges.each do |edge|
+            next if seen[edge]
+            seen[edge] = true
+            d1 = vert_disp[edge.start]
+            d2 = vert_disp[edge.end]
+            next unless d1 && d2
+            edge_vec    = edge.end.position - edge.start.position
+            edge_len_sq = edge_vec.dot(edge_vec)
+            next if edge_len_sq < 1.0e-12
+            diff = Geom::Vector3d.new(d2.x - d1.x, d2.y - d1.y, d2.z - d1.z)
+            dot_diff = diff.dot(edge_vec)
+            next if dot_diff.abs < 1.0e-12
+            critical = -edge_len_sq / dot_diff
+            if critical > 0
+              cap = critical * FLIP_SAFETY
+              max_h = max_h ? [max_h, cap].min : cap
+            else
+              cap = critical * FLIP_SAFETY
+              min_h = min_h ? [min_h, cap].max : cap
+            end
+          end
+        end
+        [min_h, max_h]
       end
 
       def predict_hard_corner_verticals(boundary, vert_disp)
@@ -1260,11 +1297,11 @@ module ASM_Extensions
           face.edges.each    { |e| edge_faces[e]   << face }
         end
 
-        # One top position per bottom vertex. In coordinated mode the
-        # displacement comes from the global precomputed map (so vertices
-        # shared between adjacent surface groups land at the same point);
+        # Unit displacement per vertex. In coordinated mode the direction
+        # comes from the global precomputed map (so vertices shared
+        # between adjacent surface groups land at the same point);
         # otherwise it's the local LSQ over this group's own faces.
-        vertex_top = {}
+        vertex_unit_disp = {}
         vertex_faces.each do |vertex, vfaces|
           p = vertex.position
           if @coord_unit_disp_by_pos
@@ -1272,14 +1309,23 @@ module ASM_Extensions
           else
             disp_world = nil
           end
-          vertex_top[vertex] = if disp_world
-            # Transform the world-space unit displacement back into the
-            # group's local frame, then scale by height.
-            d = disp_world.transform(xform_inv)
-            Geom::Point3d.new(p.x + height * d.x, p.y + height * d.y, p.z + height * d.z)
+          vertex_unit_disp[vertex] = if disp_world
+            disp_world.transform(xform_inv)
           else
-            compute_offset_vertex(p, vfaces.map(&:normal), height)
+            top1 = compute_offset_vertex(p, vfaces.map(&:normal), 1.0)
+            Geom::Vector3d.new(top1.x - p.x, top1.y - p.y, top1.z - p.z)
           end
+        end
+
+        # Clamp height so no edge's top counterpart can flip relative to
+        # its bottom (sphere extruded inward past its radius would
+        # collapse vertices onto each other).
+        height = clamp_height_to_avoid_flip(faces, vertex_unit_disp, height)
+
+        vertex_top = {}
+        vertex_unit_disp.each do |vertex, d|
+          p = vertex.position
+          vertex_top[vertex] = Geom::Point3d.new(p.x + height * d.x, p.y + height * d.y, p.z + height * d.z)
         end
 
         # Lift each face. Vertex order follows the bottom face's outer loop
@@ -1287,7 +1333,7 @@ module ASM_Extensions
         # flipping when the new face neighbours already-built geometry.
         faces.each do |face|
           pts = face.outer_loop.vertices.map { |v| vertex_top[v] }
-          add_top_face(ents, face, pts)
+          add_top_face(ents, face, pts, height)
         end
 
         # Build walls on every boundary edge of the group — including
@@ -1316,14 +1362,49 @@ module ASM_Extensions
 
         classify_shell_edges(ents, faces, boundary_edges)
 
-        # The input faces' fronts now face into the shell (the extrusion ran
-        # in their normal direction). Flip them so the bottom skin's front
-        # points outward, matching what pushpull would have produced.
-        faces.each(&:reverse!)
+        # For h > 0 the input faces' fronts now face into the shell (the
+        # extrusion ran in their normal direction), so we flip them so the
+        # bottom skin points outward. For h < 0 the shell sits on the
+        # other side; the original orientation is already outward, so we
+        # leave them alone.
+        faces.each(&:reverse!) if height >= 0
       end
 
       SURFACE_ATTR_DICT   = 'asm_faceup_surface'.freeze
       SURFACE_ATTR_NORMAL = 'original_normal'.freeze
+
+      # Walk every edge of the bottom faces and ask: at what height does
+      # its top counterpart degenerate (collapse to zero length or flip)?
+      # Return a `height` clamped 5% below the worst offender so the
+      # extrusion stays well-formed even under aggressive negative input.
+      FLIP_SAFETY = 0.95
+
+      def clamp_height_to_avoid_flip(faces, vertex_unit_disp, height)
+        safe = height
+        seen = {}
+        faces.each do |face|
+          face.edges.each do |edge|
+            next if seen[edge]
+            seen[edge] = true
+            d1 = vertex_unit_disp[edge.start]
+            d2 = vertex_unit_disp[edge.end]
+            next unless d1 && d2
+            edge_vec = edge.end.position - edge.start.position
+            edge_len_sq = edge_vec.dot(edge_vec)
+            next if edge_len_sq < 1.0e-12
+            diff = Geom::Vector3d.new(d2.x - d1.x, d2.y - d1.y, d2.z - d1.z)
+            dot_diff = diff.dot(edge_vec)
+            next if dot_diff.abs < 1.0e-12
+            critical = -edge_len_sq / dot_diff
+            if height > 0 && critical > 0
+              safe = [safe, critical * FLIP_SAFETY].min
+            elsif height < 0 && critical < 0
+              safe = [safe, critical * FLIP_SAFETY].max
+            end
+          end
+        end
+        safe
+      end
 
       # Final pass that decides each edge's soft/smooth state. Two kinds of
       # edges are forced hard:
@@ -1503,19 +1584,48 @@ module ASM_Extensions
       # single plane, so we fan-triangulate from the first vertex. The new
       # diagonals are left at default state — `classify_shell_edges` runs
       # at the end and tags them based on the dihedral angle.
-      def add_top_face(ents, face, pts)
-        if pts.length <= 3 || coplanar?(pts)
+      def add_top_face(ents, face, pts, height)
+        # A negative extrusion can pull adjacent V_tops together (the bowl
+        # collapses inward), so dedupe consecutive duplicates and bail out
+        # if there's no real polygon left.
+        pts = dedupe_consecutive_points(pts)
+        return if pts.length < 3
+
+        # For h > 0 the top is on the far side of the bottom face's front:
+        # we want its normal aligned with `face.normal`. For h < 0 the
+        # top sits behind the bottom face, so the top's outward direction
+        # is opposite — we want its normal anti-aligned with `face.normal`.
+        want_aligned = height >= 0
+
+        orient = lambda do |f|
+          aligned = f.normal.dot(face.normal) > 0
+          f.reverse! if aligned != want_aligned
+        end
+
+        if pts.length == 3 || coplanar?(pts)
           top = ents.add_face(pts)
           return unless top
-          top.reverse! if top.normal.dot(face.normal) < 0
+          orient.call(top)
           return
         end
 
         (1...pts.length - 1).each do |i|
-          tri = ents.add_face(pts[0], pts[i], pts[i + 1])
+          tri_pts = [pts[0], pts[i], pts[i + 1]]
+          next if tri_pts[0] == tri_pts[1] || tri_pts[1] == tri_pts[2] || tri_pts[0] == tri_pts[2]
+          tri = ents.add_face(tri_pts)
           next unless tri
-          tri.reverse! if tri.normal.dot(face.normal) < 0
+          orient.call(tri)
         end
+      end
+
+      def dedupe_consecutive_points(pts)
+        return pts if pts.length < 2
+        kept = [pts[0]]
+        (1...pts.length).each do |i|
+          kept << pts[i] unless pts[i] == kept.last
+        end
+        kept.pop if kept.length > 1 && kept.first == kept.last
+        kept
       end
 
       def coplanar?(pts, tol = 1.0e-6)
@@ -1538,25 +1648,25 @@ module ASM_Extensions
         top_s    = vertex_top[v1]
         top_e    = vertex_top[v2]
         outward  = (bottom_e - bottom_s).cross(face.normal)
-        pts      = [bottom_s, bottom_e, top_e, top_s]
+        # A negative extrusion can collapse top_s onto top_e (or onto a
+        # bottom point) when neighbouring V_tops converge. Dedupe before
+        # asking SketchUp to build the face — `add_face` rejects arrays
+        # with duplicate points.
+        pts      = dedupe_consecutive_points([bottom_s, bottom_e, top_e, top_s])
+        return if pts.length < 3
         n_world  = xform ? face.normal.transform(xform) : face.normal
         n_attr   = [n_world.x, n_world.y, n_world.z]
 
-        if coplanar?(pts)
+        if pts.length == 3 || coplanar?(pts)
           wall = ents.add_face(pts)
           return unless wall
           wall.reverse! if wall.normal.dot(outward) < 0
-          # Stamp the wall with the source surface's normal so a later
-          # extrusion can find it by its bottom edge position. Walls live
-          # at the boundary where neighbouring surfaces meet, so this
-          # gives the cross-group lookup a second anchor besides the
-          # original-face attribute.
           wall.set_attribute(SURFACE_ATTR_DICT, SURFACE_ATTR_NORMAL, n_attr)
           return
         end
 
-        tri1 = ents.add_face(bottom_s, bottom_e, top_e)
-        tri2 = ents.add_face(bottom_s, top_e,    top_s)
+        tri1 = ents.add_face(pts[0], pts[1], pts[2])
+        tri2 = ents.add_face(pts[0], pts[2], pts[3])
         [tri1, tri2].each do |tri|
           next unless tri
           tri.reverse! if tri.normal.dot(outward) < 0
