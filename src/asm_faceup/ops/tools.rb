@@ -1090,6 +1090,14 @@ module ASM_Extensions
       # tilts its boundary to meet whatever neighbouring geometry is in
       # the model, even if those neighbours aren't being extruded.
       def compute_coord_data_by_position(surfaces)
+        # Accumulate raw normals from every face touching each world
+        # position. The downstream LSQ (`compute_offset_vertex`) places
+        # V_top at perpendicular distance `h` from each plane, and the
+        # angular dedup there collapses fan triangulations. Grouping by
+        # soft-edge connectivity is tempting but wrong: a soft edge only
+        # marks the *visual* absence of a crease (used for cylinder
+        # walls, smoothed corners, etc.) and can sit between genuinely
+        # perpendicular faces — averaging those would erase the corner.
         pos_to_normals = {}
         surfaces.each do |sf|
           sf.each do |f|
@@ -1520,38 +1528,33 @@ module ASM_Extensions
         end
       end
 
-      # Position of a bottom vertex on the lifted surface, so the projection
-      # of (V_top − V) on each adjacent face's normal equals `height`. Each
-      # face's offset plane gives one linear constraint
-      #     n_i · V_top = n_i · V + h
-      # and `compute_offset_vertex` solves the resulting system:
-      #
-      # - N=1 → trivial: V + h·n.
-      # - N=2 → bisector closed form (exact intersection of two planes):
-      #     V_top = V + (h / (1 + n₁·n₂)) · (n₁ + n₂).
-      # - N=3 → the 3×3 system n_i·V_top = n_i·V + h is square; we solve it
-      #   by Cramer's rule (a unique intersection of three planes, exact).
-      # - N≥4 → overdetermined; we solve the normal equations
-      #     (MᵀM) v = Mᵀb
-      #   which yields the least-squares closest point to all offset planes.
-      # - Singular cases (degenerate planes, anti-parallel normals) fall
-      #   back to the averaged-normal heuristic à la Joint Push Pull.
+      # Position of a bottom vertex on the lifted surface. V_top is the
+      # point at perpendicular distance `height` from every adjacent
+      # face's plane — strict equidistance. For each face we get the
+      # constraint n_i · (V_top − V_orig) = h; solving this overdetermined
+      # system in the least-squares sense gives
+      #     (MᵀM) w = h · Σ n_i,
+      # where w = V_top − V_orig and M is the matrix of unit normals.
+      # For N=2 (non-collinear normals) the closed-form bisector solution
+      # is exact: V_top = V_orig + (h/(1+cos θ))·(n₁+n₂). When the system
+      # is singular (all normals coplanar, or anti-parallel pair) we fall
+      # back to extruding along the averaged direction.
       def compute_offset_vertex(position, normals, height)
         return position if normals.empty?
         return position.offset(normals.first, height) if normals.size == 1
 
-        # Drop parallel duplicates so two coplanar neighbours don't show up
-        # as two redundant rows (which would make the 3×3 system rank
-        # deficient and force the heuristic fallback).
+        # Merge near-parallel normals so a fan triangulation of one planar
+        # region doesn't show up as N redundant constraints (which makes
+        # MᵀM rank-deficient and biases the LSQ residual).
         normals = dedupe_parallel_normals(normals)
         return position.offset(normals.first, height) if normals.size == 1
 
         if normals.size == 2
           n1, n2 = normals
           cos_t  = n1.dot(n2)
-          if (1.0 + cos_t).abs < 1e-9
-            return position.offset(n1, height)
-          end
+          # Anti-parallel: planes coincide on opposite sides; the bisector
+          # direction is undefined. Pick either normal.
+          return position.offset(n1, height) if (1.0 + cos_t).abs < 1e-9
           t = height.to_f / (1.0 + cos_t)
           return Geom::Point3d.new(
             position.x + t * (n1.x + n2.x),
@@ -1560,55 +1563,43 @@ module ASM_Extensions
           )
         end
 
-        # Build the normal equations (MᵀM) v = Mᵀb. Each row of M is a
-        # face's unit normal, b_i = n_i · V + h.
+        # N ≥ 3: build the 3×3 normal-equation system (MᵀM) w = h · Σ n_i
+        # and solve by Cramer. b_i = h here (offset distance) because we
+        # solve for the displacement w = V_top − V_orig directly, not for
+        # V_top in world coordinates.
         a = Array.new(3) { Array.new(3, 0.0) }
-        c = [0.0, 0.0, 0.0]
-        vp = [position.x.to_f, position.y.to_f, position.z.to_f]
+        sum_n = [0.0, 0.0, 0.0]
         normals.each do |n|
-          nv    = [n.x.to_f, n.y.to_f, n.z.to_f]
-          rhs_i = nv[0] * vp[0] + nv[1] * vp[1] + nv[2] * vp[2] + height
+          nv = [n.x.to_f, n.y.to_f, n.z.to_f]
           3.times do |j|
-            c[j] += nv[j] * rhs_i
+            sum_n[j] += nv[j]
             3.times { |k| a[j][k] += nv[j] * nv[k] }
           end
         end
+        c = sum_n.map { |s| s * height.to_f }
 
-        result = solve_3x3(a, c)
-        return result if result
-
-        # Singular system (e.g., all normals coplanar) — fall back to the
-        # averaged-normal heuristic.
-        sum_x = sum_y = sum_z = 0.0
-        normals.each do |n|
-          sum_x += n.x
-          sum_y += n.y
-          sum_z += n.z
+        w = solve_3x3(a, c)
+        if w
+          return Geom::Point3d.new(position.x + w.x, position.y + w.y, position.z + w.z)
         end
-        sum = Geom::Vector3d.new(sum_x, sum_y, sum_z)
-        return position.offset(normals.first, height) if sum.length < 1e-9
 
-        dir     = sum.normalize
-        avg_cos = normals.inject(0.0) { |acc, n| acc + n.dot(dir) } / normals.size
-        return position.offset(dir, height) if avg_cos.abs < 0.05
+        # Singular system — every normal lies in a common plane (or the
+        # set degenerates). Fall back to the averaged-direction extrusion
+        # so we still produce something usable along the dominant axis.
+        sum_x, sum_y, sum_z = sum_n
+        sum_len = Math.sqrt(sum_x * sum_x + sum_y * sum_y + sum_z * sum_z)
+        return position.offset(normals.first, height) if sum_len < 1e-6
 
-        position.offset(dir, height.to_f / avg_cos)
-      end
-
-      # Collapse parallel unit vectors so the constraint set has no
-      # redundant rows. Two normals are treated as duplicates when their
-      # dot product is within 1e-9 of 1 — typical for fan-out triangulations
-      # of a planar region where several faces share the same plane.
-      def dedupe_parallel_normals(normals)
-        kept = []
-        normals.each do |n|
-          kept << n unless kept.any? { |r| r.dot(n) > 1.0 - 1e-9 }
-        end
-        kept
+        position.offset(
+          Geom::Vector3d.new(sum_x / sum_len, sum_y / sum_len, sum_z / sum_len),
+          height,
+        )
       end
 
       # Solve a 3×3 linear system A·v = b by Cramer's rule. Returns the
-      # Point3d solution, or nil if the system is singular.
+      # solution as a Vector3d, or nil if the system is singular within
+      # tolerance. The 1e-12 cutoff is comfortable for the well-scaled
+      # MᵀM matrices we feed it (unit normals → entries bounded by N).
       def solve_3x3(a, b)
         det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) -
               a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
@@ -1616,16 +1607,43 @@ module ASM_Extensions
         return nil if det.abs < 1e-12
 
         inv = 1.0 / det
-        x = inv * (b[0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) -
-                   b[1] * (a[0][1] * a[2][2] - a[0][2] * a[2][1]) +
-                   b[2] * (a[0][1] * a[1][2] - a[0][2] * a[1][1]))
+        x = inv * (b[0]  * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) -
+                   b[1]  * (a[0][1] * a[2][2] - a[0][2] * a[2][1]) +
+                   b[2]  * (a[0][1] * a[1][2] - a[0][2] * a[1][1]))
         y = inv * (-b[0] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
                    b[1]  * (a[0][0] * a[2][2] - a[0][2] * a[2][0]) -
                    b[2]  * (a[0][0] * a[1][2] - a[0][2] * a[1][0]))
-        z = inv * (b[0] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]) -
-                   b[1] * (a[0][0] * a[2][1] - a[0][1] * a[2][0]) +
-                   b[2] * (a[0][0] * a[1][1] - a[0][1] * a[1][0]))
-        Geom::Point3d.new(x, y, z)
+        z = inv * (b[0]  * (a[1][0] * a[2][1] - a[1][1] * a[2][0]) -
+                   b[1]  * (a[0][0] * a[2][1] - a[0][1] * a[2][0]) +
+                   b[2]  * (a[0][0] * a[1][1] - a[0][1] * a[1][0]))
+        Geom::Vector3d.new(x, y, z)
+      end
+
+      # Cluster near-parallel unit vectors and return one averaged
+      # representative per cluster. The 2° threshold (cos ≈ 0.9994)
+      # catches fan triangulations of a planar region (which would
+      # otherwise show up as redundant constraints and bias MᵀM) without
+      # collapsing genuine creases. Averaging — instead of keeping the
+      # first normal of each cluster — keeps the LSQ unbiased when one
+      # cluster has more entries than another.
+      PARALLEL_NORMAL_COS_THRESHOLD = 0.9994
+
+      def dedupe_parallel_normals(normals)
+        clusters = []
+        normals.each do |n|
+          c = clusters.find { |cl| cl[:rep].dot(n) > PARALLEL_NORMAL_COS_THRESHOLD }
+          if c
+            c[:list] << n
+            sx = c[:list].sum(&:x)
+            sy = c[:list].sum(&:y)
+            sz = c[:list].sum(&:z)
+            mag = Math.sqrt(sx * sx + sy * sy + sz * sz)
+            c[:rep] = Geom::Vector3d.new(sx / mag, sy / mag, sz / mag) if mag > 1e-9
+          else
+            clusters << { rep: n, list: [n] }
+          end
+        end
+        clusters.map { |c| c[:rep] }
       end
 
       # Build the lifted face on top. When the top vertices stay coplanar
