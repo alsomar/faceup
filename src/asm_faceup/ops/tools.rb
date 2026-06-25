@@ -206,6 +206,11 @@ module ASM_Extensions
         @coord_unit_disp_by_pos = nil
         @coord_shared_edge_pos  = nil
         @ctrl_was_held          = false
+        # Set in `activate` when re-extruding inside a SurfaceUp group. It
+        # strips *external* context from the coordination (adjacent unselected
+        # faces and already-extruded neighbour groups) while leaving
+        # coordination *among the selected geometry* intact.
+        @ignore_external_context = false
       end
 
       def activate
@@ -221,6 +226,20 @@ module ASM_Extensions
 
         Debug.separator
         Debug.log(self.class, __method__, "Tool activated — #{@selected_faces.size} face(s) selected")
+
+        # Second-extrusion rule: when the active edit context is a group that
+        # SurfaceUp itself created, re-extruding its interior must ignore all
+        # *external* context — neither adjacent unselected faces nor already-
+        # extruded neighbour groups should tilt the result, so the shell can't
+        # drift by re-reading its own or neighbours' stored normals.
+        # Coordination *among the selected geometry* still applies (shared
+        # vertices across the selection stay welded). A fresh face extruded
+        # from *outside* such a group sits in a different edit context, so it
+        # still consults it normally.
+        if @mode == :surface && extruding_surface_group_interior?
+          @ignore_external_context = true
+          Debug.log(self.class, __method__, "Inside SurfaceUp group — external context ignored (local coordination kept)")
+        end
 
         @preview_cache = if @mode == :surface
           build_surface_preview_cache(@selected_faces)
@@ -559,7 +578,8 @@ module ASM_Extensions
         dir = @flip_direction ? Lang.t(:tools, :faceup, :status_flipped) : ""
         coord_hint = if @mode == :surface
           tag = @coordinated_extrusion ? " [COORDINADO]" : ""
-          " | Ctrl: alternar coordinado/independiente#{tag}"
+          ext = @ignore_external_context ? " (sin contexto externo)" : ""
+          " | Ctrl: alternar coordinado/independiente#{tag}#{ext}"
         else
           ""
         end
@@ -1118,28 +1138,34 @@ module ASM_Extensions
               k = pos_key(v.position)
               acc = (pos_to_normals[k] ||= [])
               acc << f.normal
-              v.faces.each { |adj| acc << adj.normal }
+              # External source (a): faces outside the selection that touch a
+              # selected vertex. Skipped when re-extruding a SurfaceUp group's
+              # interior — there we only want the selected geometry to agree
+              # with itself, not tilt toward whatever it sits against.
+              v.faces.each { |adj| acc << adj.normal } unless @ignore_external_context
             end
           end
         end
 
-        # Pull in normals from already-extruded surfaces in the model.
-        # Their original face is tagged with `SURFACE_ATTR_DICT`, so we
-        # don't have to guess which face in a group is the bottom — and
-        # the stored vector is the pre-reverse outward normal in the
-        # group's local frame, so we just transform it to world.
-        Sketchup.active_model.entities.grep(Sketchup::Group).each do |group|
-          xform = group.transformation
-          group.entities.grep(Sketchup::Face).each do |f|
-            stored = f.get_attribute(SURFACE_ATTR_DICT, SURFACE_ATTR_NORMAL)
-            next unless stored
-            # Stored is already in world coords (captured pre-alignment so
-            # the group's later axis rotation can't muddle it).
-            n_world = Geom::Vector3d.new(*stored)
-            f.vertices.each do |v|
-              k = pos_key(v.position.transform(xform))
-              next unless pos_to_normals.key?(k)
-              pos_to_normals[k] << n_world
+        # External source (b): normals from already-extruded surfaces in the
+        # model. Their original face is tagged with `SURFACE_ATTR_DICT`, so we
+        # don't have to guess which face in a group is the bottom — and the
+        # stored vector is the pre-reverse outward normal in world coords, so
+        # we just read it back. Skipped for the same reason as (a): a second
+        # extrusion of a finished shell must not re-read its own (or its
+        # neighbours') stored normals and drift.
+        unless @ignore_external_context
+          Sketchup.active_model.entities.grep(Sketchup::Group).each do |group|
+            xform = group.transformation
+            group.entities.grep(Sketchup::Face).each do |f|
+              stored = f.get_attribute(SURFACE_ATTR_DICT, SURFACE_ATTR_NORMAL)
+              next unless stored
+              n_world = Geom::Vector3d.new(*stored)
+              f.vertices.each do |v|
+                k = pos_key(v.position.transform(xform))
+                next unless pos_to_normals.key?(k)
+                pos_to_normals[k] << n_world
+              end
             end
           end
         end
@@ -1366,6 +1392,10 @@ module ASM_Extensions
         groups.each do |group|
           extrude_surface(group, height)
 
+          # Stamp the group as a SurfaceUp product so a later re-extrusion of
+          # its interior is detected and skips external context.
+          group.set_attribute(SURFACE_ATTR_DICT, SURFACE_ATTR_IS_GROUP, true)
+
           group.entities.grep(Sketchup::Face).each { |f| f.layer = default_layer }
           group.entities.grep(Sketchup::Edge).each { |e| e.layer = default_layer }
 
@@ -1512,8 +1542,25 @@ module ASM_Extensions
         faces.each(&:reverse!) if height >= 0
       end
 
-      SURFACE_ATTR_DICT   = 'asm_faceup_surface'.freeze
-      SURFACE_ATTR_NORMAL = 'original_normal'.freeze
+      SURFACE_ATTR_DICT     = 'asm_faceup_surface'.freeze
+      SURFACE_ATTR_NORMAL   = 'original_normal'.freeze
+      # Marker set on every group SurfaceUp creates. Its presence on the
+      # active edit context means we're re-extruding the interior of a
+      # finished SurfaceUp shell — see `extruding_surface_group_interior?`.
+      SURFACE_ATTR_IS_GROUP = 'is_surface_group'.freeze
+
+      # True when the tool is operating *inside* a group/component that
+      # SurfaceUp itself produced (the open instance carries the surface
+      # dictionary). That's the "second extrusion" case: the interior must
+      # ignore external context. Extruding a fresh face from outside the
+      # group leaves a different (unmarked) edit context, so it returns false
+      # there and normal coordination still applies.
+      def extruding_surface_group_interior?
+        path = Sketchup.active_model.active_path
+        ctx  = path && path.last
+        return false unless ctx
+        !ctx.attribute_dictionary(SURFACE_ATTR_DICT).nil?
+      end
 
       # Walk every edge of the bottom faces and ask: at what height does
       # its top counterpart degenerate (collapse to zero length or flip)?
