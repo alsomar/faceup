@@ -879,9 +879,10 @@ module ASM_Extensions
       def build_surface_preview_group(gfaces, coord = nil, _group_idx = nil)
         vertex_faces = Hash.new { |h, k| h[k] = [] }
         edge_face_count = Hash.new(0)
+        edge_faces      = Hash.new { |h, k| h[k] = [] }
         gfaces.each do |f|
           f.vertices.each { |v| vertex_faces[v] << f }
-          f.edges.each    { |e| edge_face_count[e] += 1 }
+          f.edges.each    { |e| edge_face_count[e] += 1; edge_faces[e] << f }
         end
 
         vert_pos  = {}
@@ -955,10 +956,11 @@ module ASM_Extensions
         # catches seam-vs-perimeter junctions naturally.
         hard_corner_verts = predict_hard_corner_verticals(boundary, vert_disp)
 
-        # Same flip-prevention range as the executed extrusion — the
-        # preview clamps the cursor distance against it so what the user
-        # sees matches what they'll get.
-        min_h, max_h = clamp_range_for_faces(gfaces, vert_disp)
+        # Same self-intersection cap the executed extrusion uses, over the
+        # same collinear-simplified loop, so the preview stops the cursor
+        # distance exactly where the result welds.
+        active_indices = compute_active_outer_loop_indices(gfaces, edge_faces, true)
+        min_h, max_h = clamp_range_for_faces(gfaces, active_indices, vert_disp)
 
         {
           vert_pos:            vert_pos,
@@ -972,30 +974,39 @@ module ASM_Extensions
         }
       end
 
-      def clamp_range_for_faces(gfaces, vert_disp)
+      # Positive/negative self-intersection caps for the preview — the
+      # range `[min_h, max_h]` outside which a concave corner would fold
+      # through itself. Mirrors `clamp_height_to_avoid_flip` (genuine
+      # near-collapse at the edge's shortest point, over the simplified
+      # loop); `nil` on a side means that direction is unconstrained.
+      def clamp_range_for_faces(gfaces, active_indices, vert_disp)
         min_h = nil
         max_h = nil
-        seen  = {}
         gfaces.each do |face|
-          face.edges.each do |edge|
-            next if seen[edge]
-            seen[edge] = true
-            d1 = vert_disp[edge.start]
-            d2 = vert_disp[edge.end]
+          verts = face.outer_loop.vertices
+          idx   = active_indices[face]
+          n     = idx.length
+          n.times do |k|
+            v1 = verts[idx[k]]
+            v2 = verts[idx[(k + 1) % n]]
+            d1 = vert_disp[v1]
+            d2 = vert_disp[v2]
             next unless d1 && d2
-            edge_vec    = edge.end.position - edge.start.position
+            edge_vec    = v2.position - v1.position
             edge_len_sq = edge_vec.dot(edge_vec)
             next if edge_len_sq < 1.0e-12
-            diff = Geom::Vector3d.new(d2.x - d1.x, d2.y - d1.y, d2.z - d1.z)
+            diff    = Geom::Vector3d.new(d2.x - d1.x, d2.y - d1.y, d2.z - d1.z)
+            diff_sq = diff.dot(diff)
+            next if diff_sq < 1.0e-12
             dot_diff = diff.dot(edge_vec)
-            next if dot_diff.abs < 1.0e-12
-            critical = -edge_len_sq / dot_diff
-            if critical > 0
-              cap = critical * FLIP_SAFETY
-              max_h = max_h ? [max_h, cap].min : cap
+            h_min = -dot_diff / diff_sq
+            next if h_min.abs < 1.0e-9
+            len_min_sq = edge_len_sq - (dot_diff * dot_diff) / diff_sq
+            next if len_min_sq > edge_len_sq * COLLAPSE_TOL_SQ
+            if h_min > 0
+              max_h = max_h ? [max_h, h_min].min : h_min
             else
-              cap = critical * FLIP_SAFETY
-              min_h = min_h ? [min_h, cap].max : cap
+              min_h = min_h ? [min_h, h_min].max : h_min
             end
           end
         end
@@ -1461,24 +1472,27 @@ module ASM_Extensions
           end
         end
 
-        # Clamp height so no edge's top counterpart can flip relative to
-        # its bottom (sphere extruded inward past its radius would
-        # collapse vertices onto each other).
-        height = clamp_height_to_avoid_flip(faces, vertex_unit_disp, height)
+        # Drop collinear outer-loop vertices up front. They are redundant for
+        # the offset and, if kept, make the flip clamp bind on a spurious
+        # sub-edge — a straight wall with a mid-vertex would otherwise limit
+        # the whole extrusion far too early. The same simplified loop drives
+        # both the clamp and the wall/top construction below. SketchUp
+        # auto-welds the dropped vertices onto the new walls, so manifolding
+        # still holds.
+        active_indices = compute_active_outer_loop_indices(faces, edge_faces, true)
+
+        # Cap the inward extrusion where the equidistant offset starts to
+        # self-intersect. A concave corner's two offset edges cross at a
+        # finite depth; past it the shell folds through itself, so we stop
+        # there (the corner welds into a sharp miter). Convex corners never
+        # self-intersect, so they spike out unclamped.
+        height = clamp_height_to_avoid_flip(faces, active_indices, vertex_unit_disp, height)
 
         vertex_top = {}
         vertex_unit_disp.each do |vertex, d|
           p = vertex.position
           vertex_top[vertex] = Geom::Point3d.new(p.x + height * d.x, p.y + height * d.y, p.z + height * d.z)
         end
-
-        # When the user opts in, drop perimeter vertices whose two
-        # neighbouring outer-loop edges are both perimeter edges of the
-        # group AND collinear with each other. The wall/top geometry then
-        # spans the simplified outer loop, while the source mesh stays
-        # untouched. SketchUp auto-welds the dropped vertex onto the new
-        # wall's bottom edge, so manifolding still holds.
-        active_indices = compute_active_outer_loop_indices(faces, edge_faces, CONFIG[:repair_edges_before])
 
         # Lift each face. Vertex order follows the bottom face's outer loop
         # so the natural normal matches; reverse! guards against SketchUp
@@ -1562,34 +1576,47 @@ module ASM_Extensions
         !ctx.attribute_dictionary(SURFACE_ATTR_DICT).nil?
       end
 
-      # Walk every edge of the bottom faces and ask: at what height does
-      # its top counterpart degenerate (collapse to zero length or flip)?
-      # Return a `height` clamped 5% below the worst offender so the
-      # extrusion stays well-formed even under aggressive negative input.
-      FLIP_SAFETY = 0.95
+      # Fraction of an edge's original length below which it counts as
+      # self-intersecting at its shortest point. A merely rotating edge
+      # (a convex corner spiking outward) keeps its length and is left free.
+      COLLAPSE_TOL_SQ = 0.05 * 0.05
 
-      def clamp_height_to_avoid_flip(faces, vertex_unit_disp, height)
-        safe = height
-        seen = {}
+      # Cap the extrusion height where the equidistant offset first
+      # self-intersects. For each active (collinear-simplified) outer-loop
+      # edge, h_min is the height where its top counterpart is shortest; if it
+      # shrinks to a near-zero sliver there — a concave corner's offset edges
+      # folding through each other — travel must stop at h_min so the corner
+      # welds to a sharp miter instead of crossing itself. Edges that only
+      # rotate/stretch (convex spikes) never trigger and grow freely; a
+      # uniform closed surface (sphere) collapses every edge at the same
+      # h_min, so inward inversion is still caught. Returns the requested
+      # height when nothing self-intersects in the travel direction.
+      def clamp_height_to_avoid_flip(faces, active_indices, vertex_unit_disp, height)
+        return height if height.zero?
+        hsign = height <=> 0
+        safe  = height
         faces.each do |face|
-          face.edges.each do |edge|
-            next if seen[edge]
-            seen[edge] = true
-            d1 = vertex_unit_disp[edge.start]
-            d2 = vertex_unit_disp[edge.end]
+          verts = face.outer_loop.vertices
+          idx   = active_indices[face]
+          n     = idx.length
+          n.times do |k|
+            v1 = verts[idx[k]]
+            v2 = verts[idx[(k + 1) % n]]
+            d1 = vertex_unit_disp[v1]
+            d2 = vertex_unit_disp[v2]
             next unless d1 && d2
-            edge_vec = edge.end.position - edge.start.position
+            edge_vec    = v2.position - v1.position
             edge_len_sq = edge_vec.dot(edge_vec)
             next if edge_len_sq < 1.0e-12
-            diff = Geom::Vector3d.new(d2.x - d1.x, d2.y - d1.y, d2.z - d1.z)
+            diff    = Geom::Vector3d.new(d2.x - d1.x, d2.y - d1.y, d2.z - d1.z)
+            diff_sq = diff.dot(diff)
+            next if diff_sq < 1.0e-12              # endpoints move together: edge rigid
             dot_diff = diff.dot(edge_vec)
-            next if dot_diff.abs < 1.0e-12
-            critical = -edge_len_sq / dot_diff
-            if height > 0 && critical > 0
-              safe = [safe, critical * FLIP_SAFETY].min
-            elsif height < 0 && critical < 0
-              safe = [safe, critical * FLIP_SAFETY].max
-            end
+            h_min = -dot_diff / diff_sq            # height where the top edge is shortest
+            next if (h_min <=> 0) != hsign         # shortest point lies the other way: edge grows
+            len_min_sq = edge_len_sq - (dot_diff * dot_diff) / diff_sq
+            next if len_min_sq > edge_len_sq * COLLAPSE_TOL_SQ  # edge only rotates: free to spike
+            safe = hsign > 0 ? [safe, h_min].min : [safe, h_min].max
           end
         end
         safe
