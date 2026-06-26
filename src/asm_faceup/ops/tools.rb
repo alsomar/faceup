@@ -1614,7 +1614,10 @@ module ASM_Extensions
           verts = face.outer_loop.vertices
           idx   = active_indices[face]
           pts   = idx.map { |i| vertex_top[verts[i]] }
-          add_top_face(ents, face, pts, height)
+          hole_loops = face.loops.reject(&:outer?).map do |lp|
+            lp.vertices.map { |v| vertex_top[v] }
+          end
+          add_top_face(ents, face, pts, height, hole_loops)
         end
 
         # Build walls on every boundary edge of the group — including
@@ -1644,6 +1647,28 @@ module ASM_Extensions
               # the intermediate source vertices into the new wall face's
               # outer loop so the bottom face stays manifold.
               add_boundary_wall_for(ents, face, v1, v2, vertex_top, xform)
+            end
+          end
+        end
+
+        # Walls on inner-loop (hole) edges too, so each hole becomes a real
+        # through-hole with its own wall instead of a pocket capped by the
+        # top. Inner-loop vertices follow the loop's own winding (opposite
+        # the outer loop), so the wall ends up facing into the hole.
+        faces.each do |face|
+          face.loops.each do |loop|
+            next if loop.outer?
+            lv = loop.vertices
+            n  = lv.length
+            n.times do |k|
+              v1 = lv[k]
+              v2 = lv[(k + 1) % n]
+              edge = v1.common_edge(v2)
+              next unless edge && edge_faces[edge].size == 1
+              add_boundary_wall_for(ents, face, v1, v2, vertex_top, xform)
+              next if boundary_seen[edge]
+              boundary_seen[edge] = true
+              boundary_edges << [edge, vertex_top[v1], vertex_top[v2]]
             end
           end
         end
@@ -1933,7 +1958,7 @@ module ASM_Extensions
       # single plane, so we fan-triangulate from the first vertex. The new
       # diagonals are left at default state — `classify_shell_edges` runs
       # at the end and tags them based on the dihedral angle.
-      def add_top_face(ents, face, pts, height)
+      def add_top_face(ents, face, pts, height, hole_loops = [])
         # A negative extrusion can pull adjacent V_tops together (the bowl
         # collapses inward), so dedupe consecutive duplicates and bail out
         # if there's no real polygon left.
@@ -1954,7 +1979,11 @@ module ASM_Extensions
         if pts.length == 3 || coplanar?(pts)
           top = ents.add_face(pts)
           return unless top
-          orient.call(top)
+          # Cut inner loops (holes) out of the planar top: adding the hole
+          # ring splits it off `top`, erasing that ring leaves the hole while
+          # keeping its edges for the inner walls to meet.
+          cut_top_holes(ents, hole_loops)
+          orient.call(top) if top.valid?
           return
         end
 
@@ -1971,6 +2000,18 @@ module ASM_Extensions
           next if i == last_i
           diag = find_edge_between(ents, tri_pts[0], tri_pts[2])
           mark_quad_divider(diag) if diag
+        end
+      end
+
+      # Cut each hole loop out of a freshly-built planar top face. Adding the
+      # hole ring as a face splits it off the top; erasing the ring leaves
+      # the top with the hole and keeps the ring edges for the inner walls.
+      def cut_top_holes(ents, hole_loops)
+        hole_loops.each do |hpts|
+          hpts = dedupe_consecutive_points(hpts)
+          next if hpts.length < 3
+          ring = ents.add_face(hpts)
+          ring.erase! if ring && ring.valid?
         end
       end
 
