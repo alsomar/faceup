@@ -193,7 +193,11 @@ module ASM_Extensions
         @distance_frozen     = false
         @frozen_point        = nil
         @axis_lock           = nil
-        @flip_direction      = false
+        # Seed the flip flag from the (possibly remembered, possibly negative)
+        # default distance so it stays in sync with the actual direction.
+        # Otherwise typing a length or dragging after Tab derives the sign
+        # from @flip_direction and contradicts the direction shown.
+        @flip_direction      = @extrusion_distance.to_f < 0
         @operation_open      = false
         @anchor_ip           = Sketchup::InputPoint.new
         @cursor_ip           = Sketchup::InputPoint.new
