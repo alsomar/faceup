@@ -29,6 +29,7 @@ module ASM_Extensions
       def test_default_config_boolean_values
         bool_keys = %i[
           use_last_extrusion context_menu dark_mode debug_mode
+          align_to_min_bb
         ]
         bool_keys.each do |key|
           val = DEFAULT_CONFIG[key]

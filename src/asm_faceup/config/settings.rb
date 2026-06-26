@@ -10,7 +10,6 @@ module ASM_Extensions
       use_last_extrusion:      true,
       default_extrusion:       0,
       align_to_min_bb:         false,
-      repair_edges_before:     false,
 
       # Inner Options
       dark_mode: false,

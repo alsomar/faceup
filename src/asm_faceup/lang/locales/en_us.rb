@@ -42,7 +42,6 @@ module ASM_Extensions
               default_extrusion:      "Initial value",
               reset_value:            "Reset to default value",
               align_to_min_bb:        "Auto-orient bounding box",
-              repair_edges_before:    "Repair edges before extruding",
               general_options:        "General Options",
               language_selection: "Language selection",
               language_hint:      "You may need to restart SketchUp to update the language settings.",

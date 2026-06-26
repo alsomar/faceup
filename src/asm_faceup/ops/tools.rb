@@ -925,12 +925,11 @@ module ASM_Extensions
       # Independent face mode: per-face pushpull preview (bottom mesh, outer
       # loop, hard contour edges) lifted uniformly along the face normal.
       def build_independent_face_preview_cache(faces)
-        repair = CONFIG[:repair_edges_before]
         faces.map do |face|
           mesh  = face.mesh(7)
           verts = face.outer_loop.vertices
           edges = face.outer_loop.edges
-          kept  = repair ? simplifiable_kept_indices(verts, edges) : (0...verts.length).to_a
+          kept  = simplifiable_kept_indices(verts, edges)
           kept_pts = kept.map { |i| verts[i].position }
           hard_edges = []
           kept.length.times do |k|
@@ -1420,7 +1419,6 @@ module ASM_Extensions
       def xtrd_groups_per_face(groups, height)
         default_layer = Sketchup.active_model.layers[0]
         align         = CONFIG[:align_to_min_bb]
-        repair        = CONFIG[:repair_edges_before]
 
         groups.each do |group|
           entities = group.entities.to_a
@@ -1431,15 +1429,12 @@ module ASM_Extensions
 
           next unless faces.first
 
-          # If the user asked for it, drop collinear outer-loop vertices
-          # before pushpulling — same intent as in SurfaceUp, but here the
-          # rebuild happens inside the per-face group so the user's source
-          # mesh stays untouched.
-          if repair
-            rebuilt = simplify_outer_loop_in_group(group, faces.first)
-            faces = group.entities.grep(Sketchup::Face) if rebuilt
-            next unless faces.first
-          end
+          # Drop collinear outer-loop vertices before pushpulling — same
+          # intent as in SurfaceUp, but here the rebuild happens inside the
+          # per-face group so the user's source mesh stays untouched.
+          rebuilt = simplify_outer_loop_in_group(group, faces.first)
+          faces = group.entities.grep(Sketchup::Face) if rebuilt
+          next unless faces.first
 
           # The profile normal (before pushpull) is the extrusion axis.
           normal = faces.first.normal
@@ -2068,9 +2063,9 @@ module ASM_Extensions
           c = clusters.find { |cl| cl[:rep].dot(n) > PARALLEL_NORMAL_COS_THRESHOLD }
           if c
             c[:list] << n
-            sx = c[:list].sum(&:x)
-            sy = c[:list].sum(&:y)
-            sz = c[:list].sum(&:z)
+            sx = c[:list].inject(0.0) { |a, v| a + v.x }
+            sy = c[:list].inject(0.0) { |a, v| a + v.y }
+            sz = c[:list].inject(0.0) { |a, v| a + v.z }
             mag = Math.sqrt(sx * sx + sy * sy + sz * sz)
             c[:rep] = Geom::Vector3d.new(sx / mag, sy / mag, sz / mag) if mag > 1e-9
           else

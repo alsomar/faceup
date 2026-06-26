@@ -123,12 +123,6 @@
                       <label class="custom-control-label" for="settingsAlignBoundingBox">{{ t('html.settings.align_to_min_bb') }}</label>
                     </div>
 
-                    <!-- Repair edges before extruding -->
-                    <div class="custom-control custom-switch">
-                      <input type="checkbox" class="custom-control-input" v-model="settingsRepairEdgesBefore" id="settingsRepairEdgesBefore">
-                      <label class="custom-control-label" for="settingsRepairEdgesBefore">{{ t('html.settings.repair_edges_before') }}</label>
-                    </div>
-
                     <!-- Use Last Extrusion -->
                     <div class="custom-control custom-switch">
                       <input type="checkbox" class="custom-control-input" v-model="settingsUseLastExtrusion" id="settingsUseLastExtrusion">
@@ -318,7 +312,6 @@
           settingsDefaultExtrusion:     '0',
           settingsModelUnit:            '',
           settingsAlignBoundingBox:     false,
-          settingsRepairEdgesBefore:    false,
 
           // General Options
           settingsLanguage:    'auto',
@@ -386,7 +379,6 @@
             use_last_extrusion:       this.settingsUseLastExtrusion,
             default_extrusion:        this.settingsDefaultExtrusion,
             align_to_min_bb:          this.settingsAlignBoundingBox,
-            repair_edges_before:      this.settingsRepairEdgesBefore,
             language:            this.settingsLanguage,
             context_menu:        this.settingsContextMenu,
             dark_mode:           this.darkMode,
@@ -492,7 +484,6 @@
           this.settingsUseLastExtrusion     = true;
           this.settingsDefaultExtrusion     = '0';
           this.settingsAlignBoundingBox     = false;
-          this.settingsRepairEdgesBefore    = false;
           this.settingsLanguage           = 'auto';
           this.settingsContextMenu        = false;
           this.darkMode                   = false;
