@@ -192,6 +192,7 @@ module ASM_Extensions
         @anchor_set          = false
         @distance_frozen     = false
         @frozen_point        = nil
+        @pending_commit_distance = nil
         @axis_lock           = nil
         # Seed the flip flag from the (possibly remembered, possibly negative)
         # default distance so it stays in sync with the actual direction.
@@ -264,6 +265,7 @@ module ASM_Extensions
         @anchor_set          = false
         @distance_frozen     = false
         @frozen_point        = nil
+        @pending_commit_distance = nil
         @axis_lock           = nil
         @v_ip                = nil
         stop_ctrl_poll_timer
@@ -367,16 +369,34 @@ module ASM_Extensions
       end
 
       def onLButtonDown(flags, x, y, view)
-        unless @anchor_set
+        if @distance_frozen
+          # A distance is already marked: this click starts a NEW measurement
+          # — it becomes the start point and the next click marks the end. The
+          # distance always takes an explicit start *and* end; re-clicking
+          # never nudges the old end. Stash the marked distance so a double-
+          # click (whose leading down lands here) still commits what was dialed
+          # in; the end-click branch clears the stash once a fresh end is set.
+          @pending_commit_distance = @extrusion_distance
+          @anchor_ip.pick(view, x, y)
+          @cursor_ip.pick(view, x, y)
+          @anchor_set         = true
+          @distance_frozen    = false
+          @frozen_point       = nil
+          @extrusion_distance = compute_pick_distance(@cursor_ip)  # ~0 at the new start
+          update_vcb(nil, @extrusion_distance.to_s)
+          view.invalidate
+          Debug.log(self.class, __method__, "Re-anchor (new start) at #{@anchor_ip.position}")
+        elsif !@anchor_set
           @anchor_ip.pick(view, x, y)
           @cursor_ip.pick(view, x, y)
           @anchor_set = true
           Debug.log(self.class, __method__, "Anchor set at #{@anchor_ip.position}")
         else
           pick_cursor(view, x, y)
-          @extrusion_distance = compute_pick_distance(@cursor_ip)
-          @distance_frozen    = true
-          @frozen_point       = effective_cursor_position(view)
+          @extrusion_distance      = compute_pick_distance(@cursor_ip)
+          @distance_frozen         = true
+          @frozen_point            = effective_cursor_position(view)
+          @pending_commit_distance = nil
           update_vcb(nil, @extrusion_distance.to_s)
           view.invalidate
           Debug.log(self.class, __method__, "Distance set: #{@extrusion_distance} — cursor=#{@cursor_ip.position}")
@@ -452,6 +472,10 @@ module ASM_Extensions
       end
 
       def onLButtonDoubleClick(flags, x, y, view)
+        # The leading down of this double-click may have restarted a fresh
+        # measurement off a frozen distance (collapsing it); restore the
+        # marked value so the double-click still commits what was dialed in.
+        @extrusion_distance = @pending_commit_distance if @pending_commit_distance
         execute(view)
         reset_tool
       end
@@ -472,13 +496,18 @@ module ASM_Extensions
       private
 
       # The cursor InputPoint uses the strongest available context:
+      # - while a distance is frozen, pick context-free so the cursor simply
+      #   detects vertices/edges, ready to drop a NEW start point — no
+      #   from-anchor inference lingering from the finished measurement.
       # - @v_ip when a previously-snapped reference vertex/edge/face is alive,
       #   so SketchUp draws "from V on X axis" inferences with native magnetism.
       # - else @anchor_ip once an anchor click has been made, for from-anchor
       #   axis inferences.
       # - else nothing (free cursor).
       def pick_cursor(view, x, y)
-        if @v_ip && @v_ip.valid?
+        if @distance_frozen
+          @cursor_ip.pick(view, x, y)
+        elsif @v_ip && @v_ip.valid?
           @cursor_ip.pick(view, x, y, @v_ip)
         elsif @anchor_set
           @cursor_ip.pick(view, x, y, @anchor_ip)
@@ -547,6 +576,7 @@ module ASM_Extensions
         @anchor_set          = false
         @distance_frozen     = false
         @frozen_point        = nil
+        @pending_commit_distance = nil
         @axis_lock           = nil
         @v_ip                = nil
         @anchor_ip           = Sketchup::InputPoint.new
@@ -2254,6 +2284,7 @@ module ASM_Extensions
         @anchor_set          = false
         @distance_frozen     = false
         @frozen_point        = nil
+        @pending_commit_distance = nil
         @axis_lock           = nil
         @v_ip                = nil
         @inference_lock_held = false
@@ -2314,6 +2345,10 @@ module ASM_Extensions
       # cursor's own inference marker and from-V/from-anchor axis lines are
       # drawn natively by @cursor_ip.draw(view).
       def draw_orange_line(view)
+        # Once the distance is frozen the measurement is done: drop the orange
+        # line (and the from-anchor marker) so only the committed preview and
+        # the cursor's vertex detection show, ready for a fresh start click.
+        return if @distance_frozen
         return unless @anchor_ip.valid?
         cursor_pos = effective_cursor_position(view)
         return unless cursor_pos
@@ -2321,10 +2356,10 @@ module ASM_Extensions
         s2 = view.screen_coords(cursor_pos)
 
         if @axis_lock
-          view.line_width    = 2
+          view.line_width    = 3
           view.drawing_color = AXIS_COLORS[@axis_lock]
         else
-          view.line_width    = 1
+          view.line_width    = 2
           view.drawing_color = ORANGE
         end
         view.draw2d(GL_LINES,
