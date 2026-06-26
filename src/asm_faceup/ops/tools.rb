@@ -727,13 +727,21 @@ module ASM_Extensions
           vert_pos  = group[:vert_pos]
           # Same flip-clamp the executed extrusion uses, so the preview
           # matches the result instead of running past the safe range.
+          # Coordinated face mode stops a hair short of the exact collapse
+          # (COORD_FACE_CAP_SAFETY) so the converging tip stays clean; the
+          # preview must apply the same margin to match the result.
+          cap_sf = @mode == :face ? COORD_FACE_CAP_SAFETY : 1.0
+          hi = group[:max_safe_h] && group[:max_safe_h] * cap_sf
+          lo = group[:min_safe_h] && group[:min_safe_h] * cap_sf
           dist = raw_dist
-          dist = group[:max_safe_h] if group[:max_safe_h] && dist > group[:max_safe_h]
-          dist = group[:min_safe_h] if group[:min_safe_h] && dist < group[:min_safe_h]
+          dist = hi if hi && dist > hi
+          dist = lo if lo && dist < lo
+
+          hole_scale = coordinated_face_hole_scale(group, dist)
 
           group[:tris].each do |tri|
             bottom = tri.map { |meta| surface_meta_bottom(meta) }
-            top    = tri.map { |meta| surface_meta_top(meta, vert_disp, vert_pos, dist) }
+            top    = tri.map { |meta| surface_meta_top(meta, vert_disp, vert_pos, dist, hole_scale) }
             gray_tris.concat(bottom)
             white_tris.concat(top)
           end
@@ -816,12 +824,23 @@ module ASM_Extensions
       end
 
       def surface_meta_bottom(meta)
-        meta[0] == :v ? meta[1].position : meta[1]
+        (meta[0] == :v || meta[0] == :hole) ? meta[1].position : meta[1]
       end
 
-      def surface_meta_top(meta, vert_disp, vert_pos, dist)
-        if meta[0] == :v
+      # `hole_scale` is [ct, s] for coordinated face mode: hole-loop points are
+      # slid toward the panel's convergence centre `ct` by the outer's
+      # contraction `s`, matching `scale_panel_holes` so the preview shows the
+      # hole tapering/converging like the result. nil (surface mode, no holes)
+      # leaves hole points on their straight perpendicular lift.
+      def surface_meta_top(meta, vert_disp, vert_pos, dist, hole_scale = nil)
+        case meta[0]
+        when :v
           surface_top_pt(meta[1], vert_disp, vert_pos, dist)
+        when :hole
+          p = surface_top_pt(meta[1], vert_disp, vert_pos, dist)
+          return p unless hole_scale
+          ct, s = hole_scale
+          Geom::Point3d.new(ct.x + s * (p.x - ct.x), ct.y + s * (p.y - ct.y), ct.z + s * (p.z - ct.z))
         else
           meta[1].offset(meta[2], dist)
         end
@@ -831,6 +850,25 @@ module ASM_Extensions
         d = vert_disp[vertex]
         p = vert_pos[vertex]
         Geom::Point3d.new(p.x + dist * d.x, p.y + dist * d.y, p.z + dist * d.z)
+      end
+
+      # Convergence centre `ct` and contraction `s` for a coordinated face
+      # panel's holes at the current distance — the same quantities
+      # `scale_panel_holes` uses on the result, so the preview's holes taper
+      # and converge identically. Returns nil for surface mode, holeless
+      # panels, or degenerate input.
+      def coordinated_face_hole_scale(group, dist)
+        return nil unless @mode == :face && group[:has_holes] && group[:outer_verts]
+        vp = group[:vert_pos]
+        vd = group[:vert_disp]
+        ob = group[:outer_verts].map { |v| vp[v] }
+        ot = group[:outer_verts].map { |v| surface_top_pt(v, vd, vp, dist) }
+        cb = average_position(ob)
+        ct = average_position(ot)
+        den = ob.reduce(0.0) { |a, p| a + p.distance(cb) }
+        return nil if den < 1.0e-9
+        s = ot.reduce(0.0) { |a, p| a + p.distance(ct) } / den
+        [ct, s]
       end
 
       # Build the cache entries for surface mode: one per soft-connected
@@ -951,11 +989,22 @@ module ASM_Extensions
           face.outer_loop.vertices.each do |v|
             loop_v_by_pos[pos_key(v.position)] = v
           end
+          hole_v_by_pos = {}
+          face.loops.each do |lp|
+            next if lp.outer?
+            lp.vertices.each { |v| hole_v_by_pos[pos_key(v.position)] = v }
+          end
           point_meta = {}
           (1..mesh.count_points).each do |pi|
             pt = mesh.point_at(pi)
-            v  = loop_v_by_pos[pos_key(pt)]
-            point_meta[pi] = v ? [:v, v] : [:interior, pt, face.normal]
+            k  = pos_key(pt)
+            point_meta[pi] = if (ov = loop_v_by_pos[k])
+              [:v, ov]
+            elsif (hv = hole_v_by_pos[k])
+              [:hole, hv]
+            else
+              [:interior, pt, face.normal]
+            end
           end
           mesh.polygons.each do |tri|
             tris << tri.map { |i| point_meta[i.abs] }
@@ -1011,6 +1060,8 @@ module ASM_Extensions
           hard_internal_edges: hard_internal_edges,
           min_safe_h:          min_h,
           max_safe_h:          max_h,
+          outer_verts:         gfaces.flat_map { |f| f.outer_loop.vertices }.uniq,
+          has_holes:           gfaces.any? { |f| f.loops.size > 1 },
         }
       end
 
@@ -1399,14 +1450,86 @@ module ASM_Extensions
             # panels meet flush. Independent mode just pushpulls a straight
             # prism, which can never self-intersect, so it skips the cap.
             h = clamp_coordinated_panel_height(group, faces.first, height)
+            holes = capture_panel_holes(faces.first)   # before pushpull
             faces.first.pushpull(h)
             move_panel_top_to_coordinated(group, normal, h)
+            # The hole top is lifted straight by pushpull; scale it toward its
+            # own centre by the same factor the coordinated outer contour
+            # shrinks, so the hole tapers with the block instead of staying a
+            # straight perpendicular shaft.
+            scale_panel_holes(group, normal, h, holes) if holes
           else
             faces.first.pushpull(height)
           end
           apply_min_bb_alignment(group, normal) if align
         end
       end
+
+      # Snapshot a panel's hole loops (and its outer ring) before pushpull, in
+      # the group's local frame, for the post-pushpull hole scaling.
+      def capture_panel_holes(face)
+        return nil if face.loops.size < 2
+        {
+          outer:  face.outer_loop.vertices.map(&:position),
+          holes:  face.loops.reject(&:outer?).map { |lp| lp.vertices.map(&:position) },
+        }
+      end
+
+      # Scale each hole's lifted top toward its centre by the factor the
+      # coordinated outer contour shrinks (top spread / bottom spread), so the
+      # hole tapers together with the panel. s < 1 inward (block narrows), s > 1
+      # outward. The lifted hole verts sit at bottom + h·normal after pushpull;
+      # we slide them in-plane to the scaled position.
+      def scale_panel_holes(group, normal, height, data)
+        xform     = group.transformation
+        xform_inv = xform.inverse
+        ob = data[:outer]
+        cb = average_position(ob)
+        ot = ob.map do |p|
+          disp = @coord_unit_disp_by_pos[pos_key(p.transform(xform))]
+          d    = disp ? disp.transform(xform_inv) : normal
+          p.offset(d, height)
+        end
+        ct  = average_position(ot)
+        den = ob.reduce(0.0) { |a, p| a + p.distance(cb) }
+        return if den < 1.0e-9
+        s = ot.reduce(0.0) { |a, p| a + p.distance(ct) } / den
+
+        # Scale the holes toward the OUTER top centroid `ct` (the panel's
+        # convergence point), not each hole's own centre, by the outer's
+        # contraction `s`. That way as the block narrows inward the holes
+        # converge toward the same apex the outer does — at the cap everything
+        # meets at one point instead of the hole shaft poking through the
+        # collapsing outer.
+        all = group.entities.grep(Sketchup::Edge).flat_map(&:vertices).uniq
+        data[:holes].each do |hole_bottom|
+          tops = hole_bottom.map { |p| all.find { |v| v.position == p.offset(normal, height) } }.compact
+          next if tops.length < 2
+          targets = []
+          vectors = []
+          tops.each do |v|
+            p  = v.position
+            np = Geom::Point3d.new(ct.x + s * (p.x - ct.x), ct.y + s * (p.y - ct.y), ct.z + s * (p.z - ct.z))
+            targets << v
+            vectors << (np - p)
+          end
+          group.entities.transform_by_vectors(targets, vectors)
+        end
+      end
+
+      def average_position(pts)
+        n = pts.length.to_f
+        sx = pts.inject(0.0) { |a, p| a + p.x }
+        sy = pts.inject(0.0) { |a, p| a + p.y }
+        sz = pts.inject(0.0) { |a, p| a + p.z }
+        Geom::Point3d.new(sx / n, sy / n, sz / n)
+      end
+
+      # Stop a coordinated panel a hair short of the exact self-intersection,
+      # so the converging outer (and the holes converging with it) end in a
+      # thin clean tip instead of an exactly-degenerate point. SurfaceUp can
+      # weld that point through add_face dedup; FaceUp's pushpull+move can't.
+      COORD_FACE_CAP_SAFETY = 0.97
 
       # Clamp a coordinated panel's pushpull to its self-intersection depth,
       # the same per-panel cap the surface-style preview applies, so what gets
@@ -1416,7 +1539,8 @@ module ASM_Extensions
         edge_faces = Hash.new { |h, k| h[k] = [] }
         face.edges.each { |e| edge_faces[e] << face }
         active = compute_active_outer_loop_indices([face], edge_faces, true)
-        clamp_height_to_avoid_flip([face], active, unit_disp, height)
+        capped = clamp_height_to_avoid_flip([face], active, unit_disp, height)
+        capped == height ? capped : (capped * COORD_FACE_CAP_SAFETY).to_l
       end
 
       # Per-vertex coordinated unit displacement for a panel's bottom face, in
