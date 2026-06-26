@@ -86,6 +86,7 @@ module ASM_Extensions
               status_pick:    "FaceUp: Haz clic para fijar la distancia | Tab para invertir | ESC para restablecer el origen | Espacio para cancelar",
               status_adjust:  "FaceUp: Haz clic para ajustar | Tab para invertir | Enter/DblClic para confirmar | ESC para restablecer el origen | Espacio para cancelar",
               status_flipped: " [INVERTIDO]",
+              status_both_sides: " [AMBOS LADOS]",
               no_faces:       "No hay caras seleccionadas.",
               invalid_length: "Longitud no válida. Introduce una distancia correcta.",
             }

@@ -12,6 +12,7 @@ module ASM_Extensions
         status_pick
         status_adjust
         status_flipped
+        status_both_sides
         no_faces
         invalid_length
       ].freeze

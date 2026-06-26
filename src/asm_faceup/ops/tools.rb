@@ -199,6 +199,8 @@ module ASM_Extensions
         # Otherwise typing a length or dragging after Tab derives the sign
         # from @flip_direction and contradicts the direction shown.
         @flip_direction      = @extrusion_distance.to_f < 0
+        @both_sides          = false
+        @both_pending_flip   = false
         @operation_open      = false
         @anchor_ip           = Sketchup::InputPoint.new
         @cursor_ip           = Sketchup::InputPoint.new
@@ -308,6 +310,9 @@ module ASM_Extensions
         held = (@ctrl_async_key_state.call(0x11) & 0x8000) != 0
         if held && !@ctrl_was_held
           @coordinated_extrusion = !@coordinated_extrusion
+          # Switching into coordinated FaceUp drops the "both sides" stop, so
+          # fall back to a forward extrusion if it was engaged.
+          set_direction_forward if @both_sides && !both_sides_available?
           rebuild_preview_cache
           update_status_text
           (@current_view || Sketchup.active_model.active_view).invalidate
@@ -336,11 +341,12 @@ module ASM_Extensions
             end
           end
         else
+          lo, hi = preview_offsets
           @preview_cache.each do |data|
             n = data[:normal]
             data[:loop_pts].each do |p|
-              bb.add(p)
-              bb.add(p.offset(n, dist))
+              bb.add(p.offset(n, lo))
+              bb.add(p.offset(n, hi))
             end
           end
         end
@@ -416,14 +422,7 @@ module ASM_Extensions
             reset_tool
           end
         when KEYS[:tab]
-          @flip_direction    = !@flip_direction
-          # `-Length` collapses to a raw Float, which would then `.to_s`
-          # in inches and break the VCB display. Coerce back to Length so
-          # SketchUp formats it in the model's display units.
-          @extrusion_distance = (-@extrusion_distance).to_l
-          update_vcb(nil, @extrusion_distance.to_s)
-          update_status_text
-          view.invalidate
+          cycle_extrude_direction(view)
           return true
         when KEYS[:arrow_left]  # X axis (red)
           toggle_axis_lock(:x, view)
@@ -570,6 +569,57 @@ module ASM_Extensions
         update_vcb(nil, @extrusion_distance.to_s)
       end
 
+      # Whether the "both sides" Tab state is offered. For now only independent
+      # FaceUp (a plain prism centred on the face plane); SurfaceUp and
+      # coordinated FaceUp keep the two-way forward/backward cycle.
+      def both_sides_available?
+        @mode == :face && !@coordinated_extrusion
+      end
+
+      # Tab cycles the extrusion direction. With "both sides" available it sits
+      # between the two one-sided states, reached from each:
+      #   forward → both → backward → both → forward …
+      # `@both_pending_flip` remembers which one-sided state the *next* Tab out
+      # of "both" lands on (the two "both" stops differ only in that). Where
+      # "both" isn't available (SurfaceUp, coordinated FaceUp) Tab just toggles
+      # forward/backward. "Both" keeps the distance positive — it's the total
+      # thickness, split half to each side; the one-sided states carry the sign.
+      def cycle_extrude_direction(view)
+        if !both_sides_available?
+          @flip_direction = !@flip_direction
+          apply_direction_sign
+        elsif @both_sides
+          @both_sides     = false
+          @flip_direction = @both_pending_flip
+          apply_direction_sign
+        else
+          # Entering "both": remember which side the next Tab exits to, then
+          # clear the flip so the distance reads positive (it's the total
+          # thickness, sign-free) while in this symmetric stop.
+          @both_pending_flip  = !@flip_direction
+          @flip_direction     = false
+          @both_sides         = true
+          @extrusion_distance = @extrusion_distance.abs.to_l
+        end
+        update_vcb(nil, @extrusion_distance.to_s)
+        update_status_text
+        view.invalidate
+      end
+
+      # Coerce @extrusion_distance to its magnitude with the current flip sign.
+      # `-Length` collapses to a raw Float (which `.to_s`es in inches and breaks
+      # the VCB), so round-trip back to Length for the model's display units.
+      def apply_direction_sign
+        mag = @extrusion_distance.abs
+        @extrusion_distance = (@flip_direction ? -mag : mag).to_l
+      end
+
+      def set_direction_forward
+        @both_sides         = false
+        @flip_direction     = false
+        @extrusion_distance = @extrusion_distance.abs.to_l
+      end
+
       def reset_pick_state(view)
         view.lock_inference if @inference_lock_held
         @inference_lock_held = false
@@ -583,7 +633,13 @@ module ASM_Extensions
       end
 
       def update_status_text
-        dir = @flip_direction ? Lang.t(:tools, :faceup, :status_flipped) : ""
+        dir = if @both_sides
+          Lang.t(:tools, :faceup, :status_both_sides)
+        elsif @flip_direction
+          Lang.t(:tools, :faceup, :status_flipped)
+        else
+          ""
+        end
         coord_hint = if @mode == :surface
           tag = @coordinated_extrusion ? " [COORDINADO]" : ""
           ext = @ignore_external_context ? " (sin contexto externo)" : ""
@@ -665,35 +721,50 @@ module ASM_Extensions
         @preview_cache.each { |data| view.draw(GL_LINE_LOOP, data[:loop_pts]) }
       end
 
+      # Normal lift is [0, dist]; "both sides" straddles the face plane at
+      # ±dist/2, so the preview mirrors the symmetric solid the executed
+      # extrusion builds.
+      def preview_offsets
+        if @both_sides
+          half = @extrusion_distance.abs / 2.0
+          [-half, half]
+        else
+          [0, @extrusion_distance]
+        end
+      end
+
       def draw_extrusion_preview(view)
         return if @preview_cache.empty?
         return draw_surface_extrusion_preview(view) if surface_style_preview?
 
+        lo, hi = preview_offsets
         gray_tris  = []
         gray_quads = []
         white_tris = []
         hard_lines = []
 
         @preview_cache.each do |data|
-          n    = data[:normal]
-          dist = @extrusion_distance
+          n = data[:normal]
 
           data[:tris].each do |pts|
-            top = pts.map { |p| p.offset(n, dist) }
+            bot = pts.map { |p| p.offset(n, lo) }
+            top = pts.map { |p| p.offset(n, hi) }
 
-            gray_tris.concat(pts)
+            gray_tris.concat(bot)
             pts.each_index do |j|
               k = (j + 1) % pts.length
-              gray_quads.concat([pts[j], pts[k], top[k], top[j]])
+              gray_quads.concat([bot[j], bot[k], top[k], top[j]])
             end
             white_tris.concat(top)
           end
 
-          # Top and vertical edges — hard edges only
+          # Top and vertical edges — hard edges only. With both sides the
+          # bottom is a real face too, so draw its outline as well.
           data[:hard_edges].each do |s, e|
-            st = s.offset(n, dist)
-            et = e.offset(n, dist)
-            hard_lines.concat([st, et, s, st, e, et])
+            sb = s.offset(n, lo); eb = e.offset(n, lo)
+            st = s.offset(n, hi); et = e.offset(n, hi)
+            hard_lines.concat([st, et, sb, st, eb, et])
+            hard_lines.concat([sb, eb]) if @both_sides
           end
 
         end
@@ -707,8 +778,12 @@ module ASM_Extensions
 
         view.drawing_color = PREVIEW_BLUE
 
-        # Top face outline — always drawn as a full loop
-        @preview_cache.each { |data| view.draw(GL_LINE_LOOP, data[:loop_pts].map { |p| p.offset(data[:normal], @extrusion_distance) }) }
+        # Face outline — top loop always; bottom loop too when both-sided.
+        @preview_cache.each do |data|
+          n = data[:normal]
+          view.draw(GL_LINE_LOOP, data[:loop_pts].map { |p| p.offset(n, hi) })
+          view.draw(GL_LINE_LOOP, data[:loop_pts].map { |p| p.offset(n, lo) }) if @both_sides
+        end
 
         # Top and vertical hard edges
         view.draw(GL_LINES, hard_lines) unless hard_lines.empty?
@@ -1483,6 +1558,16 @@ module ASM_Extensions
             # shrinks, so the hole tapers with the block instead of staying a
             # straight perpendicular shaft.
             scale_panel_holes(group, normal, h, holes) if holes
+          elsif @both_sides
+            # Symmetric solid: extrude the full thickness, then slide the body
+            # back by half so it straddles the face plane (−h/2 … +h/2). The
+            # original face plane ends up internal (no face there), centred.
+            total = height.abs
+            faces.first.pushpull(total)
+            half  = total / 2.0
+            shift = Geom::Transformation.translation(
+              Geom::Vector3d.new(-half * normal.x, -half * normal.y, -half * normal.z))
+            group.entities.transform_entities(shift, group.entities.to_a)
           else
             faces.first.pushpull(height)
           end
@@ -2289,6 +2374,7 @@ module ASM_Extensions
         @v_ip                = nil
         @inference_lock_held = false
         @flip_direction      = false
+        @both_sides          = false
         @operation_open      = false
         Sketchup::set_status_text("", SB_PROMPT)
         UI.start_timer(0) { Sketchup.active_model.select_tool(nil) }
