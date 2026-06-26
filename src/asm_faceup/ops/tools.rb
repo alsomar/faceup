@@ -241,37 +241,11 @@ module ASM_Extensions
           Debug.log(self.class, __method__, "Inside SurfaceUp group — external context ignored (local coordination kept)")
         end
 
-        @preview_cache = if @mode == :surface
-          build_surface_preview_cache(@selected_faces)
-        else
-          repair = CONFIG[:repair_edges_before]
-          @selected_faces.map do |face|
-            mesh = face.mesh(7)
-            verts = face.outer_loop.vertices
-            edges = face.outer_loop.edges
-            kept  = repair ? simplifiable_kept_indices(verts, edges) : (0...verts.length).to_a
-            kept_pts = kept.map { |i| verts[i].position }
-            hard_edges = []
-            kept.length.times do |k|
-              # The edge starting at `verts[kept[k]]` represents the run
-              # of collinear edges between this kept vertex and the next.
-              e = edges[kept[k]]
-              next if e.soft? || e.curve
-              i_next = kept[(k + 1) % kept.length]
-              hard_edges << [verts[kept[k]].position, verts[i_next].position]
-            end
-            {
-              normal:     face.normal,
-              tris:       mesh.polygons.map { |tri| tri.map { |i| mesh.point_at(i.abs) } },
-              loop_pts:   kept_pts,
-              hard_edges: hard_edges,
-            }
-          end
-        end
+        @preview_cache = build_preview_cache
 
         update_vcb
         update_status_text
-        start_ctrl_poll_timer if @mode == :surface
+        start_ctrl_poll_timer
         model.active_view.invalidate
       end
 
@@ -328,7 +302,7 @@ module ASM_Extensions
         held = (@ctrl_async_key_state.call(0x11) & 0x8000) != 0
         if held && !@ctrl_was_held
           @coordinated_extrusion = !@coordinated_extrusion
-          rebuild_surface_preview_cache
+          rebuild_preview_cache
           update_status_text
           (@current_view || Sketchup.active_model.active_view).invalidate
         end
@@ -347,7 +321,7 @@ module ASM_Extensions
         return bb if @preview_cache.empty? || @extrusion_distance.zero?
 
         dist = @extrusion_distance
-        if @mode == :surface
+        if surface_style_preview?
           @preview_cache.each do |group|
             group[:vert_disp].each do |v, disp|
               p = group[:vert_pos][v]
@@ -580,6 +554,9 @@ module ASM_Extensions
           tag = @coordinated_extrusion ? " [COORDINADO]" : ""
           ext = @ignore_external_context ? " (sin contexto externo)" : ""
           " | Ctrl: alternar coordinado/independiente#{tag}#{ext}"
+        elsif @mode == :face
+          tag = @coordinated_extrusion ? " [COORDINADO]" : ""
+          " | Ctrl: alternar coordinado/independiente#{tag}"
         else
           ""
         end
@@ -593,10 +570,11 @@ module ASM_Extensions
         Sketchup::set_status_text(@status_text)
       end
 
-      def rebuild_surface_preview_cache
-        return unless @mode == :surface
+      # Rebuild after a Ctrl toggle: the cache style depends on
+      # coordinated/independent, so rebuild through the mode-aware builder.
+      def rebuild_preview_cache
         return if @selected_faces.empty?
-        @preview_cache = build_surface_preview_cache(@selected_faces)
+        @preview_cache = build_preview_cache
       end
 
       def execute(view)
@@ -642,7 +620,7 @@ module ASM_Extensions
 
       def draw_face_highlight(view)
         return if @preview_cache.empty?
-        return draw_surface_highlight(view) if @mode == :surface
+        return draw_surface_highlight(view) if surface_style_preview?
 
         tris = @preview_cache.flat_map { |data| data[:tris].flatten }
 
@@ -655,7 +633,7 @@ module ASM_Extensions
 
       def draw_extrusion_preview(view)
         return if @preview_cache.empty?
-        return draw_surface_extrusion_preview(view) if @mode == :surface
+        return draw_surface_extrusion_preview(view) if surface_style_preview?
 
         gray_tris  = []
         gray_quads = []
@@ -856,6 +834,27 @@ module ASM_Extensions
       # preview scales linearly with @extrusion_distance), pre-triangulated
       # surface mesh, boundary edges (for wall preview) and hard boundary
       # edges (for the blue outline).
+      # True when the cache is built with the welded-surface machinery —
+      # surface mode, or coordinated face mode (singleton-per-face). Drives
+      # which draw/extents path the preview takes.
+      def surface_style_preview?
+        @mode == :surface || @coordinated_extrusion
+      end
+
+      # Mode-aware preview cache. Surface mode and coordinated face mode both
+      # use the welded-surface builder (face mode treats each face as its own
+      # singleton surface, so walls form on every edge); independent face mode
+      # keeps the lightweight per-face pushpull cache.
+      def build_preview_cache
+        if @mode == :surface
+          build_surface_preview_cache(@selected_faces)
+        elsif @coordinated_extrusion
+          build_coordinated_face_preview_cache(@selected_faces)
+        else
+          build_independent_face_preview_cache(@selected_faces)
+        end
+      end
+
       def build_surface_preview_cache(faces)
         groups = group_faces_by_soft_connectivity(faces)
 
@@ -867,6 +866,43 @@ module ASM_Extensions
 
         groups.each_with_index.map do |gfaces, i|
           build_surface_preview_group(gfaces, coord, i)
+        end
+      end
+
+      # Coordinated face mode: one singleton surface group per face so the
+      # mitered tops and per-edge walls are drawn by the surface machinery,
+      # with shared vertices unified across panels by position.
+      def build_coordinated_face_preview_cache(faces)
+        groups = faces.map { |f| [f] }
+        coord  = coordinated_preview_data(groups)
+        groups.each_with_index.map do |gfaces, i|
+          build_surface_preview_group(gfaces, coord, i)
+        end
+      end
+
+      # Independent face mode: per-face pushpull preview (bottom mesh, outer
+      # loop, hard contour edges) lifted uniformly along the face normal.
+      def build_independent_face_preview_cache(faces)
+        repair = CONFIG[:repair_edges_before]
+        faces.map do |face|
+          mesh  = face.mesh(7)
+          verts = face.outer_loop.vertices
+          edges = face.outer_loop.edges
+          kept  = repair ? simplifiable_kept_indices(verts, edges) : (0...verts.length).to_a
+          kept_pts = kept.map { |i| verts[i].position }
+          hard_edges = []
+          kept.length.times do |k|
+            e = edges[kept[k]]
+            next if e.soft? || e.curve
+            i_next = kept[(k + 1) % kept.length]
+            hard_edges << [verts[kept[k]].position, verts[i_next].position]
+          end
+          {
+            normal:     face.normal,
+            tris:       mesh.polygons.map { |tri| tri.map { |i| mesh.point_at(i.abs) } },
+            loop_pts:   kept_pts,
+            hard_edges: hard_edges,
+          }
         end
       end
 
@@ -1058,6 +1094,17 @@ module ASM_Extensions
       end
 
       def face2group_per_face(faces)
+        # Coordinated face mode: precompute the equidistant top per world
+        # position over the selection (each face its own singleton surface),
+        # so shared vertices of neighbouring panels resolve to the same
+        # point and the panels meet flush at a miter. Independent mode leaves
+        # the map nil and each face just pushpulls along its own normal.
+        if @coordinated_extrusion
+          precompute_coordinated_surface_data(faces.map { |f| [f] })
+        else
+          @coord_unit_disp_by_pos = nil
+        end
+
         faces_with_inner_edges    = []
         faces_without_inner_edges = []
 
@@ -1341,9 +1388,75 @@ module ASM_Extensions
 
           # The profile normal (before pushpull) is the extrusion axis.
           normal = faces.first.normal
-          faces.first.pushpull(height)
+          if @coord_unit_disp_by_pos
+            # Coordinated mode: cap the panel where its mitered top would fold
+            # through itself (matching the preview), pushpull, then slide the
+            # top vertices to the shared equidistant position so neighbouring
+            # panels meet flush. Independent mode just pushpulls a straight
+            # prism, which can never self-intersect, so it skips the cap.
+            h = clamp_coordinated_panel_height(group, faces.first, height)
+            faces.first.pushpull(h)
+            move_panel_top_to_coordinated(group, normal, h)
+          else
+            faces.first.pushpull(height)
+          end
           apply_min_bb_alignment(group, normal) if align
         end
+      end
+
+      # Clamp a coordinated panel's pushpull to its self-intersection depth,
+      # the same per-panel cap the surface-style preview applies, so what gets
+      # built matches what the cursor showed.
+      def clamp_coordinated_panel_height(group, face, height)
+        unit_disp  = panel_coordinated_unit_disp(group, face)
+        edge_faces = Hash.new { |h, k| h[k] = [] }
+        face.edges.each { |e| edge_faces[e] << face }
+        active = compute_active_outer_loop_indices([face], edge_faces, true)
+        clamp_height_to_avoid_flip([face], active, unit_disp, height)
+      end
+
+      # Per-vertex coordinated unit displacement for a panel's bottom face, in
+      # the panel's local frame (looked up by world position so it agrees with
+      # neighbouring panels). Falls back to the face normal for any vertex not
+      # in the coordinated map.
+      def panel_coordinated_unit_disp(group, face)
+        xform     = group.transformation
+        xform_inv = xform.inverse
+        disp = {}
+        face.vertices.each do |v|
+          unit_ctx = @coord_unit_disp_by_pos[pos_key(v.position.transform(xform))]
+          disp[v]  = unit_ctx ? unit_ctx.transform(xform_inv) : face.normal
+        end
+        disp
+      end
+
+      # In coordinated face mode each panel is pushpulled (which keeps holes
+      # and topology), then its top vertices are slid — within the parallel
+      # offset plane, so the top stays planar — to the shared equidistant
+      # position. Only top vertices whose base sits on a coordinated position
+      # move; the rest, and panels with no selected neighbour, stay where
+      # pushpull put them. Neighbouring panels resolve a shared vertex to the
+      # same world point, so their walls coincide and the panels meet flush.
+      def move_panel_top_to_coordinated(group, normal, height)
+        xform     = group.transformation
+        xform_inv = xform.inverse
+        verts     = group.entities.grep(Sketchup::Edge).flat_map(&:vertices).uniq
+        targets   = []
+        vectors   = []
+        verts.each do |v|
+          base       = v.position.offset(normal, -height)   # bottom counterpart (panel-local)
+          unit_ctx   = @coord_unit_disp_by_pos[pos_key(base.transform(xform))]
+          next unless unit_ctx                               # not a coordinated top vertex
+          unit_local = unit_ctx.transform(xform_inv)
+          top = Geom::Point3d.new(base.x + height * unit_local.x,
+                                  base.y + height * unit_local.y,
+                                  base.z + height * unit_local.z)
+          vec = Geom::Vector3d.new(top.x - v.position.x, top.y - v.position.y, top.z - v.position.z)
+          next if vec.length < 1.0e-9
+          targets << v
+          vectors << vec
+        end
+        group.entities.transform_by_vectors(targets, vectors) unless targets.empty?
       end
 
       # In-group perimeter cleanup for face mode. Drops outer-loop
