@@ -726,7 +726,7 @@ module ASM_Extensions
         view.draw(GL_TRIANGLES, tris)
 
         view.drawing_color = PREVIEW_BLUE
-        @preview_cache.each { |data| view.draw(GL_LINE_LOOP, data[:loop_pts]) }
+        @preview_cache.each { |data| view.draw(GL_LINE_LOOP, lift_off_face(data[:loop_pts], view, 5)) }
       end
 
       # Normal lift is [0, dist]; "both sides" straddles the face plane at
@@ -793,14 +793,17 @@ module ASM_Extensions
         # to show through), but the ORIGINAL_FACE_BLUE fill now covers it, hiding
         # the shared verticals between adjacent panels. So draw the base loop too
         # — matching coordinated mode, which always draws its base outline.
+        # Lifted toward the camera (see draw_surface_extrusion_preview) so an
+        # outline coplanar with an adjacent panel's face wins the z-fight
+        # instead of vanishing into it.
         @preview_cache.each do |data|
           n = data[:normal]
-          view.draw(GL_LINE_LOOP, data[:loop_pts].map { |p| p.offset(n, hi) })
-          view.draw(GL_LINE_LOOP, data[:loop_pts].map { |p| p.offset(n, lo) })
+          view.draw(GL_LINE_LOOP, lift_off_face(data[:loop_pts].map { |p| p.offset(n, hi) }, view, 5))
+          view.draw(GL_LINE_LOOP, lift_off_face(data[:loop_pts].map { |p| p.offset(n, lo) }, view, 5))
         end
 
         # Top and vertical hard edges
-        view.draw(GL_LINES, hard_lines) unless hard_lines.empty?
+        view.draw(GL_LINES, lift_off_face(hard_lines, view, 5)) unless hard_lines.empty?
       end
 
       # Idle highlight when no distance is set yet: surface mode shows the
@@ -824,7 +827,7 @@ module ASM_Extensions
 
         view.drawing_color = PREVIEW_BLUE
         view.line_stipple  = ''
-        view.draw(GL_LINES, outline_lines) unless outline_lines.empty?
+        view.draw(GL_LINES, lift_off_face(outline_lines, view, 5)) unless outline_lines.empty?
       end
 
       # Welded-surface extrusion preview. Per-vertex displacements come from
@@ -922,16 +925,15 @@ module ASM_Extensions
 
         view.drawing_color = PREVIEW_BLUE
         view.line_stipple  = ''
-        view.draw(GL_LINES, outline_bottom)       unless outline_bottom.empty?
-        view.draw(GL_LINES, outline_top)          unless outline_top.empty?
-        view.draw(GL_LINES, hard_corner_lines)    unless hard_corner_lines.empty?
-
-        # Internal hard edges sit at exactly the same depth as the fill,
-        # so we lift them ~5 pixels' worth of model space toward the
-        # camera. That wins the z-fight against the fill while still
-        # letting depth-testing hide them when they're on the back side of
-        # the shell.
-        view.line_stipple = ''
+        # Lift every contour line ~5 px toward the camera. The seam / cap /
+        # junction verticals lie coplanar with a neighbour panel's face (their
+        # own fill or the still-present original face), so undisplaced they
+        # z-fight and vanish. The lift is along the view direction, so the
+        # screen position is unchanged — it only wins the depth tie — and a
+        # 5 px nudge still lets real front geometry occlude back-side edges.
+        view.draw(GL_LINES, lift_off_face(outline_bottom, view, 5))    unless outline_bottom.empty?
+        view.draw(GL_LINES, lift_off_face(outline_top, view, 5))       unless outline_top.empty?
+        view.draw(GL_LINES, lift_off_face(hard_corner_lines, view, 5)) unless hard_corner_lines.empty?
         view.draw(GL_LINES, lift_off_face(hard_internal_lines, view, 5)) unless hard_internal_lines.empty?
       end
 
