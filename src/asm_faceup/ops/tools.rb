@@ -725,6 +725,8 @@ module ASM_Extensions
         view.drawing_color = Sketchup::Color.new('white')
         view.draw(GL_TRIANGLES, tris)
 
+        return unless show_preview_outlines?
+
         view.drawing_color = PREVIEW_BLUE
         @preview_cache.each { |data| view.draw(GL_LINE_LOOP, lift_off_face(data[:loop_pts], view, 5)) }
       end
@@ -741,10 +743,21 @@ module ASM_Extensions
         end
       end
 
+      # Whether the preview should draw its contour (outline/hard) edges.
+      # Dropping them on very large selections keeps the per-frame preview
+      # responsive — the fills still draw, only the outline GL_LINES are
+      # skipped. CONFIG[:preview_outline_limit] is the max selected-face count
+      # that still shows them; 0 (or negative) disables the cap entirely.
+      def show_preview_outlines?
+        limit = CONFIG[:preview_outline_limit].to_i
+        limit <= 0 || @selected_faces.length <= limit
+      end
+
       def draw_extrusion_preview(view)
         return if @preview_cache.empty?
         return draw_surface_extrusion_preview(view) if surface_style_preview?
 
+        show_outlines = show_preview_outlines?
         lo, hi = preview_offsets
         gray_tris  = []
         gray_quads = []
@@ -768,11 +781,13 @@ module ASM_Extensions
 
           # Top and vertical edges — hard edges only. With both sides the
           # bottom is a real face too, so draw its outline as well.
-          data[:hard_edges].each do |s, e|
-            sb = s.offset(n, lo); eb = e.offset(n, lo)
-            st = s.offset(n, hi); et = e.offset(n, hi)
-            hard_lines.concat([st, et, sb, st, eb, et])
-            hard_lines.concat([sb, eb]) if @both_sides
+          if show_outlines
+            data[:hard_edges].each do |s, e|
+              sb = s.offset(n, lo); eb = e.offset(n, lo)
+              st = s.offset(n, hi); et = e.offset(n, hi)
+              hard_lines.concat([st, et, sb, st, eb, et])
+              hard_lines.concat([sb, eb]) if @both_sides
+            end
           end
 
         end
@@ -785,6 +800,8 @@ module ASM_Extensions
 
         view.drawing_color = Sketchup::Color.new('white')
         view.draw(GL_TRIANGLES, white_tris)
+
+        return unless show_outlines
 
         view.drawing_color = PREVIEW_BLUE
 
@@ -810,6 +827,7 @@ module ASM_Extensions
       # welded surface as one mesh and outlines only its perimeter (not the
       # internal soft edges that connect the constituent faces).
       def draw_surface_highlight(view)
+        show_outlines = show_preview_outlines?
         bottom_tris = []
         outline_lines = []
         @preview_cache.each do |group|
@@ -817,6 +835,7 @@ module ASM_Extensions
             # Idle highlight: no distance yet, so the base is untrimmed (dist 0).
             tri.each { |meta| bottom_tris << surface_meta_bottom(meta, nil, group[:vert_pos], 0) }
           end
+          next unless show_outlines
           group[:boundary].each do |v1, v2, _n|
             outline_lines << group[:vert_pos][v1] << group[:vert_pos][v2]
           end
@@ -836,6 +855,7 @@ module ASM_Extensions
       # surface boundary, internal soft edges disappear into the skin).
       def draw_surface_extrusion_preview(view)
         raw_dist = @extrusion_distance
+        show_outlines  = show_preview_outlines?
         gray_tris      = []
         gray_quads     = []
         gray_extras    = []   # fan-triangulated walls when the quad isn't planar
@@ -884,31 +904,36 @@ module ASM_Extensions
             end
           end
 
-          group[:hard_corner_verts].each_key do |corner|
-            bs = surface_bottom_pt(corner, vert_base_disp, vert_pos, dist)
-            ts = surface_top_pt(corner, vert_disp, vert_pos, dist)
-            hard_corner_lines.concat([bs, ts])
-          end
+          # Contour edges (hard corners, hard internal edges, boundary
+          # outline) — dropped wholesale on heavy selections so the per-frame
+          # accumulation and GL_LINES draw don't lag the preview.
+          if show_outlines
+            group[:hard_corner_verts].each_key do |corner|
+              bs = surface_bottom_pt(corner, vert_base_disp, vert_pos, dist)
+              ts = surface_top_pt(corner, vert_disp, vert_pos, dist)
+              hard_corner_lines.concat([bs, ts])
+            end
 
-          group[:hard_internal_edges].each do |v1, v2|
-            bs = surface_bottom_pt(v1, vert_base_disp, vert_pos, dist)
-            be = surface_bottom_pt(v2, vert_base_disp, vert_pos, dist)
-            ts = surface_top_pt(v1, vert_disp, vert_pos, dist)
-            te = surface_top_pt(v2, vert_disp, vert_pos, dist)
-            hard_internal_lines.concat([bs, be, ts, te])
-          end
+            group[:hard_internal_edges].each do |v1, v2|
+              bs = surface_bottom_pt(v1, vert_base_disp, vert_pos, dist)
+              be = surface_bottom_pt(v2, vert_base_disp, vert_pos, dist)
+              ts = surface_top_pt(v1, vert_disp, vert_pos, dist)
+              te = surface_top_pt(v2, vert_disp, vert_pos, dist)
+              hard_internal_lines.concat([bs, be, ts, te])
+            end
 
-          group[:boundary].each do |v1, v2, _n, _seam, _buried|
-            # Every boundary edge — perimeter, seam AND buried cap — has its
-            # base and offset verticals as real hard edges in the result (each
-            # panel is its own solid), so draw both for all. Only the wall
-            # FILL is dropped for seams/caps (above); the outline always
-            # survives. (Verified edge-for-edge against the executed result,
-            # forward and inverted: 0 missing, 0 extra.)
-            outline_bottom << surface_bottom_pt(v1, vert_base_disp, vert_pos, dist)
-            outline_bottom << surface_bottom_pt(v2, vert_base_disp, vert_pos, dist)
-            outline_top << surface_top_pt(v1, vert_disp, vert_pos, dist)
-            outline_top << surface_top_pt(v2, vert_disp, vert_pos, dist)
+            group[:boundary].each do |v1, v2, _n, _seam, _buried|
+              # Every boundary edge — perimeter, seam AND buried cap — has its
+              # base and offset verticals as real hard edges in the result (each
+              # panel is its own solid), so draw both for all. Only the wall
+              # FILL is dropped for seams/caps (above); the outline always
+              # survives. (Verified edge-for-edge against the executed result,
+              # forward and inverted: 0 missing, 0 extra.)
+              outline_bottom << surface_bottom_pt(v1, vert_base_disp, vert_pos, dist)
+              outline_bottom << surface_bottom_pt(v2, vert_base_disp, vert_pos, dist)
+              outline_top << surface_top_pt(v1, vert_disp, vert_pos, dist)
+              outline_top << surface_top_pt(v2, vert_disp, vert_pos, dist)
+            end
           end
 
         end

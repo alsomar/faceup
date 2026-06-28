@@ -13,7 +13,12 @@ module ASM_Extensions
 
       # Inner Options
       dark_mode: false,
-      debug_mode: false
+      debug_mode: false,
+
+      # Max selected faces for which the preview still draws contour edges.
+      # Above it, the per-frame outline draw is dropped (fills stay) so the
+      # preview stays responsive on heavy selections. 0 disables the cap.
+      preview_outline_limit: 200
     }.freeze
 
     def self.ensure_config
