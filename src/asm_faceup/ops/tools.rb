@@ -777,8 +777,10 @@ module ASM_Extensions
 
         end
 
-        view.drawing_color = Sketchup::Color.new(220, 220, 220)
+        view.drawing_color = ORIGINAL_FACE_BLUE
         view.draw(GL_TRIANGLES, gray_tris)
+
+        view.drawing_color = Sketchup::Color.new(220, 220, 220)
         view.draw(GL_QUADS, gray_quads)
 
         view.drawing_color = Sketchup::Color.new('white')
@@ -896,8 +898,10 @@ module ASM_Extensions
 
         end
 
-        view.drawing_color = Sketchup::Color.new(220, 220, 220)
+        view.drawing_color = ORIGINAL_FACE_BLUE
         view.draw(GL_TRIANGLES, gray_tris)   unless gray_tris.empty?
+
+        view.drawing_color = Sketchup::Color.new(220, 220, 220)
         view.draw(GL_QUADS,     gray_quads)  unless gray_quads.empty?
         view.draw(GL_TRIANGLES, gray_extras) unless gray_extras.empty?
 
@@ -2671,6 +2675,9 @@ module ASM_Extensions
 
       ORANGE        = Sketchup::Color.new(255, 140, 0).freeze
       PREVIEW_BLUE  = Sketchup::Color.new(0,   0,   200).freeze
+      # Light blue fill for the original (selected) faces in the preview, so
+      # they read apart from the new extruded walls/top (kept gray/white).
+      ORIGINAL_FACE_BLUE = Sketchup::Color.new(170, 210, 240).freeze
 
       AXIS_VECTORS = {
         x: Geom::Vector3d.new(1, 0, 0),
