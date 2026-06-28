@@ -1153,7 +1153,14 @@ module ASM_Extensions
             if count == 1
               v1 = edge.start
               v2 = edge.end
-              boundary << [v1, v2, face.normal]
+              # Skip edges shared (by position) with a neighbouring panel —
+              # they're internal junction seams, not wall faces. Drawing a wall
+              # there shows each panel's end cap as a bevel even though the
+              # merged result resolves the junction cleanly.
+              unless coord && coord[:shared_edge_pos] &&
+                     coord[:shared_edge_pos][edge_pos_key(v1.position, v2.position)]
+                boundary << [v1, v2, face.normal]
+              end
             elsif count == 2
               # Internal edge — predict hard top counterpart when the two
               # adjacent faces bend > 60°.
@@ -1580,6 +1587,15 @@ module ASM_Extensions
       def wall_miter_corner(w, walls)
         v = w[:vtx]; n = w[:n]; d = w[:dir]
         straight = Geom::Point3d.new(v.x + n.x, v.y + n.y, 0)
+
+        # A collinear run continuation — another wall with the same normal
+        # sharing this vertex — keeps the wall straight: the run passes through
+        # and a transverse wall miters against IT, not the other way round.
+        # Without this the angular sweep can latch onto a transverse neighbour
+        # (the sweep direction flips when inverted, negating the normals) and
+        # bend a straight run into an angled face.
+        return straight if walls.any? { |x| !x.equal?(w) && x[:n].dot(n) > PARALLEL_NORMAL_COS_THRESHOLD }
+
         ccw = (d.x * n.y - d.y * n.x) > 0   # is n 90° CCW from d?
         best = nil; best_ang = nil
         walls.each do |x|
