@@ -803,8 +803,6 @@ module ASM_Extensions
 
         return unless show_outlines
 
-        view.drawing_color = PREVIEW_BLUE
-
         # Face outline at BOTH the base and the offset loop. The base loop used
         # to be drawn only for both-sided extrusion (the original face was left
         # to show through), but the ORIGINAL_FACE_BLUE fill now covers it, hiding
@@ -812,14 +810,18 @@ module ASM_Extensions
         # — matching coordinated mode, which always draws its base outline.
         # Lifted toward the camera (see draw_surface_extrusion_preview) so an
         # outline coplanar with an adjacent panel's face wins the z-fight
-        # instead of vanishing into it.
+        # instead of vanishing into it. The base loop (the original face, like
+        # its fill) stays blue; the offset loop (the new top) is orange.
         @preview_cache.each do |data|
           n = data[:normal]
+          view.drawing_color = ORANGE
           view.draw(GL_LINE_LOOP, lift_off_face(data[:loop_pts].map { |p| p.offset(n, hi) }, view, 5))
+          view.drawing_color = PREVIEW_BLUE
           view.draw(GL_LINE_LOOP, lift_off_face(data[:loop_pts].map { |p| p.offset(n, lo) }, view, 5))
         end
 
-        # Top and vertical hard edges
+        # Top and vertical hard edges — new, so orange.
+        view.drawing_color = ORANGE
         view.draw(GL_LINES, lift_off_face(hard_lines, view, 5)) unless hard_lines.empty?
       end
 
@@ -948,7 +950,6 @@ module ASM_Extensions
         view.drawing_color = Sketchup::Color.new('white')
         view.draw(GL_TRIANGLES, white_tris) unless white_tris.empty?
 
-        view.drawing_color = PREVIEW_BLUE
         view.line_stipple  = ''
         # Lift every contour line ~5 px toward the camera. The seam / cap /
         # junction verticals lie coplanar with a neighbour panel's face (their
@@ -956,7 +957,11 @@ module ASM_Extensions
         # z-fight and vanish. The lift is along the view direction, so the
         # screen position is unchanged — it only wins the depth tie — and a
         # 5 px nudge still lets real front geometry occlude back-side edges.
+        # Original (base) edges stay blue; the NEW edges the extrusion draws —
+        # offset perimeter, wall verticals and internal hard edges — are orange.
+        view.drawing_color = PREVIEW_BLUE
         view.draw(GL_LINES, lift_off_face(outline_bottom, view, 5))    unless outline_bottom.empty?
+        view.drawing_color = ORANGE
         view.draw(GL_LINES, lift_off_face(outline_top, view, 5))       unless outline_top.empty?
         view.draw(GL_LINES, lift_off_face(hard_corner_lines, view, 5)) unless hard_corner_lines.empty?
         view.draw(GL_LINES, lift_off_face(hard_internal_lines, view, 5)) unless hard_internal_lines.empty?
@@ -2786,7 +2791,9 @@ module ASM_Extensions
       ORANGE        = Sketchup::Color.new(255, 140, 0).freeze
       PREVIEW_BLUE  = Sketchup::Color.new(0,   0,   200).freeze
       # Light blue fill for the original (selected) faces in the preview, so
-      # they read apart from the new extruded walls/top (kept gray/white).
+      # they read apart from the new extruded walls/top (kept gray/white). The
+      # original faces and their base edges are blue; the NEW edges the
+      # extrusion draws (offset perimeter, wall verticals, internal) are orange.
       ORIGINAL_FACE_BLUE = Sketchup::Color.new(170, 210, 240).freeze
 
       AXIS_VECTORS = {
