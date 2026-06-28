@@ -788,11 +788,15 @@ module ASM_Extensions
 
         view.drawing_color = PREVIEW_BLUE
 
-        # Face outline — top loop always; bottom loop too when both-sided.
+        # Face outline at BOTH the base and the offset loop. The base loop used
+        # to be drawn only for both-sided extrusion (the original face was left
+        # to show through), but the ORIGINAL_FACE_BLUE fill now covers it, hiding
+        # the shared verticals between adjacent panels. So draw the base loop too
+        # — matching coordinated mode, which always draws its base outline.
         @preview_cache.each do |data|
           n = data[:normal]
           view.draw(GL_LINE_LOOP, data[:loop_pts].map { |p| p.offset(n, hi) })
-          view.draw(GL_LINE_LOOP, data[:loop_pts].map { |p| p.offset(n, lo) }) if @both_sides
+          view.draw(GL_LINE_LOOP, data[:loop_pts].map { |p| p.offset(n, lo) })
         end
 
         # Top and vertical hard edges
@@ -807,7 +811,8 @@ module ASM_Extensions
         outline_lines = []
         @preview_cache.each do |group|
           group[:tris].each do |tri|
-            tri.each { |meta| bottom_tris << surface_meta_bottom(meta) }
+            # Idle highlight: no distance yet, so the base is untrimmed (dist 0).
+            tri.each { |meta| bottom_tris << surface_meta_bottom(meta, nil, group[:vert_pos], 0) }
           end
           group[:boundary].each do |v1, v2, _n|
             outline_lines << group[:vert_pos][v1] << group[:vert_pos][v2]
@@ -838,8 +843,9 @@ module ASM_Extensions
         hard_internal_lines  = []
 
         @preview_cache.each do |group|
-          vert_disp = group[:vert_disp]
-          vert_pos  = group[:vert_pos]
+          vert_disp      = group[:vert_disp]
+          vert_pos       = group[:vert_pos]
+          vert_base_disp = group[:vert_base_disp]
           # Same flip-clamp the executed extrusion uses, so the preview
           # matches the result instead of running past the safe range.
           # Coordinated face mode stops a hair short of the exact collapse
@@ -855,15 +861,16 @@ module ASM_Extensions
           hole_scale = coordinated_face_hole_scale(group, dist)
 
           group[:tris].each do |tri|
-            bottom = tri.map { |meta| surface_meta_bottom(meta) }
+            bottom = tri.map { |meta| surface_meta_bottom(meta, vert_base_disp, vert_pos, dist) }
             top    = tri.map { |meta| surface_meta_top(meta, vert_disp, vert_pos, dist, hole_scale) }
             gray_tris.concat(bottom)
             white_tris.concat(top)
           end
 
-          group[:boundary].each do |v1, v2, _n|
-            bs = vert_pos[v1]
-            be = vert_pos[v2]
+          group[:boundary].each do |v1, v2, _n, seam, buried|
+            next if seam || buried   # seam/buried-cap: no wall fill (seam outline still drawn below)
+            bs = surface_bottom_pt(v1, vert_base_disp, vert_pos, dist)
+            be = surface_bottom_pt(v2, vert_base_disp, vert_pos, dist)
             ts = surface_top_pt(v1, vert_disp, vert_pos, dist)
             te = surface_top_pt(v2, vert_disp, vert_pos, dist)
             quad = [bs, be, te, ts]
@@ -875,25 +882,30 @@ module ASM_Extensions
           end
 
           group[:hard_corner_verts].each_key do |corner|
-            bs = vert_pos[corner]
+            bs = surface_bottom_pt(corner, vert_base_disp, vert_pos, dist)
             ts = surface_top_pt(corner, vert_disp, vert_pos, dist)
             hard_corner_lines.concat([bs, ts])
           end
 
           group[:hard_internal_edges].each do |v1, v2|
-            bs = vert_pos[v1]
-            be = vert_pos[v2]
+            bs = surface_bottom_pt(v1, vert_base_disp, vert_pos, dist)
+            be = surface_bottom_pt(v2, vert_base_disp, vert_pos, dist)
             ts = surface_top_pt(v1, vert_disp, vert_pos, dist)
             te = surface_top_pt(v2, vert_disp, vert_pos, dist)
             hard_internal_lines.concat([bs, be, ts, te])
           end
 
-          group[:boundary].each do |v1, v2, _n|
-            bs = vert_pos[v1]
-            be = vert_pos[v2]
-            outline_bottom << bs << be
-            outline_top    << surface_top_pt(v1, vert_disp, vert_pos, dist)
-            outline_top    << surface_top_pt(v2, vert_disp, vert_pos, dist)
+          group[:boundary].each do |v1, v2, _n, _seam, _buried|
+            # Every boundary edge — perimeter, seam AND buried cap — has its
+            # base and offset verticals as real hard edges in the result (each
+            # panel is its own solid), so draw both for all. Only the wall
+            # FILL is dropped for seams/caps (above); the outline always
+            # survives. (Verified edge-for-edge against the executed result,
+            # forward and inverted: 0 missing, 0 extra.)
+            outline_bottom << surface_bottom_pt(v1, vert_base_disp, vert_pos, dist)
+            outline_bottom << surface_bottom_pt(v2, vert_base_disp, vert_pos, dist)
+            outline_top << surface_top_pt(v1, vert_disp, vert_pos, dist)
+            outline_top << surface_top_pt(v2, vert_disp, vert_pos, dist)
           end
 
         end
@@ -940,8 +952,22 @@ module ASM_Extensions
         end
       end
 
-      def surface_meta_bottom(meta)
-        (meta[0] == :v || meta[0] == :hole) ? meta[1].position : meta[1]
+      def surface_meta_bottom(meta, vert_base_disp, vert_pos, dist)
+        if meta[0] == :v || meta[0] == :hole
+          surface_bottom_pt(meta[1], vert_base_disp, vert_pos, dist)
+        else
+          meta[1]
+        end
+      end
+
+      # Bottom point of a vertex column: the base, slid by the coordinated base
+      # trim when present (inverted subordinate panels) so the preview's bottom
+      # matches the executed result; otherwise the untouched base position.
+      def surface_bottom_pt(vertex, vert_base_disp, vert_pos, dist)
+        p = vert_pos[vertex]
+        d = vert_base_disp && vert_base_disp[vertex]
+        return p unless d
+        Geom::Point3d.new(p.x + dist * d.x, p.y + dist * d.y, p.z + dist * d.z)
       end
 
       # `hole_scale` is [ct, s] for coordinated face mode: hole-loop points are
@@ -1079,11 +1105,13 @@ module ASM_Extensions
           f.edges.each    { |e| edge_face_count[e] += 1; edge_faces[e] << f }
         end
 
-        vert_pos  = {}
-        vert_disp = {}
+        vert_pos       = {}
+        vert_disp      = {}
+        vert_base_disp = {}
         vertex_faces.each do |v, vf|
-          p    = v.position
-          disp = nil
+          p     = v.position
+          disp  = nil
+          bdisp = nil
           if coord
             k   = pos_key(p)
             inv = @extrusion_distance.to_f < 0
@@ -1099,13 +1127,22 @@ module ASM_Extensions
               subordinate = dom && dom.any? && vf.none? { |f| dom.any? { |dn| dn.parallel?(f.normal) } }
               disp = subordinate ? subordinate_disp(vf.first.normal, dom, inv) : coord[:unit_disp_by_pos][k]
             end
+            # Inverted coordinated FACE mode only: the executor
+            # (move_panel_top_to_coordinated) also slides a subordinate panel's
+            # BASE end into the neighbour run's offset plane (subordinate_base_shift),
+            # keeping base and mitered top parallel — a clean parallelogram.
+            # Without replicating it the preview keeps the untrimmed base and
+            # shows the panel as a trapezoid (the "bevel" on interior faces).
+            # SurfaceUp's executor doesn't trim, so it's scoped out here.
+            bdisp = preview_base_disp(p, vf.first.normal, coord) if inv && @mode == :face
           end
           unless disp
             top1 = compute_offset_vertex(p, vf.map(&:normal), 1.0)
             disp = Geom::Vector3d.new(top1.x - p.x, top1.y - p.y, top1.z - p.z)
           end
-          vert_pos[v]  = p
-          vert_disp[v] = disp
+          vert_pos[v]       = p
+          vert_disp[v]      = disp
+          vert_base_disp[v] = bdisp if bdisp
         end
 
         tris = []
@@ -1154,13 +1191,26 @@ module ASM_Extensions
               v1 = edge.start
               v2 = edge.end
               # Coordinated FACE mode builds each panel as its own pushpulled
-              # box, so a shared junction edge is an internal seam (the cap is
-              # hidden between panels) — skip the wall or it shows as a bevel.
-              # SurfaceUp's executor deliberately builds walls on its seams, so
-              # there the wall must stay or the preview drifts from the result.
-              seam = @mode == :face && coord && coord[:shared_edge_pos] &&
-                     coord[:shared_edge_pos][edge_pos_key(v1.position, v2.position)]
-              boundary << [v1, v2, face.normal] unless seam
+              # box, so a shared junction edge is an internal seam: its wall
+              # fill would show as a bevel (the cap is hidden in the merged
+              # result), but its outline edges are real and must still be drawn.
+              # So mark it — the draw skips the fill but keeps the outline.
+              # SurfaceUp's executor builds walls on its seams, so seam = false
+              # there and the wall stays.
+              seam = !!(@mode == :face && coord && coord[:shared_edge_pos] &&
+                        coord[:shared_edge_pos][edge_pos_key(v1.position, v2.position)])
+              # A subordinate panel's END CAP — the vertical edge at a junction
+              # where the trimmed base meets the neighbour run — lands coplanar
+              # with the run's inner face, so its WALL would show a stray gray
+              # sliver the result hides. Mark it buried to drop that fill. (Its
+              # base/offset verticals are still real hard edges, so its outline
+              # is drawn like any other.) Same plan point at both ends ⇒ vertical
+              # cap edge; both ends trimmed ⇒ subordinate.
+              k1 = pos_key(v1.position)
+              k2 = pos_key(v2.position)
+              buried = !!(vert_base_disp[v1] && vert_base_disp[v2] &&
+                          k1[0] == k2[0] && k1[1] == k2[1])
+              boundary << [v1, v2, face.normal, seam, buried]
             elsif count == 2
               # Internal edge — predict hard top counterpart when the two
               # adjacent faces bend > 60°.
@@ -1191,6 +1241,7 @@ module ASM_Extensions
         {
           vert_pos:            vert_pos,
           vert_disp:           vert_disp,
+          vert_base_disp:      vert_base_disp,
           tris:                tris,
           boundary:            boundary,
           hard_corner_verts:   hard_corner_verts,
@@ -1914,6 +1965,22 @@ module ASM_Extensions
           end
         end
         group.entities.transform_by_vectors(targets, vectors) unless targets.empty?
+      end
+
+      # Per-unit version of subordinate_base_shift for the preview: the base
+      # slide as a unit vector (per unit of extrusion distance), so the cache
+      # stays distance-independent. nil when the vertex isn't subordinate.
+      # bottom = vert_pos + dist * this; at dist = h it equals the executor's
+      # subordinate_base_shift (s·long, s = h/(long·nD)).
+      def preview_base_disp(world_pos, fn, coord)
+        dom = coord[:dominant_by_pos] && coord[:dominant_by_pos][pos_key(world_pos)]
+        return nil unless dom && dom.any?
+        return nil if dom.any? { |dn| dn.parallel?(fn) }
+        nd   = dom.first
+        long = Geom::Vector3d.new(-fn.y, fn.x, 0.0)
+        den  = long.dot(nd)
+        return nil if den.abs < 1.0e-9
+        Geom::Vector3d.new(long.x / den, long.y / den, 0.0)
       end
 
       # World shift sliding a subordinate panel's base vertex along the panel's
