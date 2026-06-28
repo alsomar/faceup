@@ -1153,14 +1153,14 @@ module ASM_Extensions
             if count == 1
               v1 = edge.start
               v2 = edge.end
-              # Skip edges shared (by position) with a neighbouring panel —
-              # they're internal junction seams, not wall faces. Drawing a wall
-              # there shows each panel's end cap as a bevel even though the
-              # merged result resolves the junction cleanly.
-              unless coord && coord[:shared_edge_pos] &&
+              # Coordinated FACE mode builds each panel as its own pushpulled
+              # box, so a shared junction edge is an internal seam (the cap is
+              # hidden between panels) — skip the wall or it shows as a bevel.
+              # SurfaceUp's executor deliberately builds walls on its seams, so
+              # there the wall must stay or the preview drifts from the result.
+              seam = @mode == :face && coord && coord[:shared_edge_pos] &&
                      coord[:shared_edge_pos][edge_pos_key(v1.position, v2.position)]
-                boundary << [v1, v2, face.normal]
-              end
+              boundary << [v1, v2, face.normal] unless seam
             elsif count == 2
               # Internal edge — predict hard top counterpart when the two
               # adjacent faces bend > 60°.
