@@ -211,6 +211,9 @@ module ASM_Extensions
         @preview_cache       = []
         @coordinated_extrusion = (mode == :surface)
         @coord_unit_disp_by_pos = nil
+        @coord_dominant_by_pos  = nil
+        @coord_miter_disp       = nil
+        @coord_miter_disp_inv   = nil
         @coord_shared_edge_pos  = nil
         @ctrl_was_held          = false
         # Set in `activate` when re-extruding inside a SurfaceUp group. It
@@ -603,6 +606,11 @@ module ASM_Extensions
         end
         update_vcb(nil, @extrusion_distance.to_s)
         update_status_text
+        # The coordinated wall miter bakes the extrusion sign into the cached
+        # per-vertex displacement (a forward vs an inverted miter map), so the
+        # preview must rebuild when Tab flips the direction or it would draw the
+        # forward miter at a now-negative distance.
+        rebuild_preview_cache
         view.invalidate
       end
 
@@ -1070,9 +1078,23 @@ module ASM_Extensions
         vert_pos  = {}
         vert_disp = {}
         vertex_faces.each do |v, vf|
-          p = v.position
+          p    = v.position
+          disp = nil
           if coord
-            disp = coord[:unit_disp_by_pos][pos_key(p)]
+            k   = pos_key(p)
+            inv = @extrusion_distance.to_f < 0
+            # Per-wall miter (forward) keeps every wall at consistent thickness;
+            # it also subsumes the run/partition flush. Falls through to the
+            # equidistant/subordinate path for non-wall (SurfaceUp) or inverted.
+            mm  = inv ? coord[:miter_disp_inv] : coord[:miter_disp]
+            md  = mm ? mm[[[k[0], k[1]], norm_key(vf.first.normal)]] : nil
+            if md
+              disp = md
+            else
+              dom = coord[:dominant_by_pos] && coord[:dominant_by_pos][k]
+              subordinate = dom && dom.any? && vf.none? { |f| dom.any? { |dn| dn.parallel?(f.normal) } }
+              disp = subordinate ? subordinate_disp(vf.first.normal, dom, inv) : coord[:unit_disp_by_pos][k]
+            end
           end
           unless disp
             top1 = compute_offset_vertex(p, vf.map(&:normal), 1.0)
@@ -1262,6 +1284,9 @@ module ASM_Extensions
           precompute_coordinated_surface_data(faces.map { |f| [f] })
         else
           @coord_unit_disp_by_pos = nil
+          @coord_dominant_by_pos  = nil
+          @coord_miter_disp       = nil
+          @coord_miter_disp_inv   = nil
         end
 
         faces_with_inner_edges    = []
@@ -1310,6 +1335,9 @@ module ASM_Extensions
           precompute_coordinated_surface_data(surfaces)
         else
           @coord_unit_disp_by_pos = nil
+          @coord_dominant_by_pos  = nil
+          @coord_miter_disp       = nil
+          @coord_miter_disp_inv   = nil
           @coord_shared_edge_pos  = nil
         end
 
@@ -1326,6 +1354,9 @@ module ASM_Extensions
       def precompute_coordinated_surface_data(surfaces)
         data = compute_coord_data_by_position(surfaces)
         @coord_unit_disp_by_pos = data[:unit_disp_by_pos]
+        @coord_dominant_by_pos  = data[:dominant_by_pos]
+        @coord_miter_disp       = data[:miter_disp]
+        @coord_miter_disp_inv   = data[:miter_disp_inv]
         @coord_shared_edge_pos  = data[:shared_edge_pos]
         @coord_shared_edge_hard = data[:shared_edge_hard]
       end
@@ -1348,18 +1379,24 @@ module ASM_Extensions
         # marks the *visual* absence of a crease (used for cylinder
         # walls, smoothed corners, etc.) and can sit between genuinely
         # perpendicular faces — averaging those would erase the corner.
-        pos_to_normals = {}
+        # Selected-face normals carry the alignment signal (how many selected
+        # faces are coplanar at a vertex); external-context normals are kept
+        # apart so a coplanar run can override them — see
+        # `coordinated_vertex_normals`.
+        pos_to_sel_normals = {}
+        pos_to_ctx_normals = {}
         surfaces.each do |sf|
           sf.each do |f|
             f.vertices.each do |v|
               k = pos_key(v.position)
-              acc = (pos_to_normals[k] ||= [])
-              acc << f.normal
+              (pos_to_sel_normals[k] ||= []) << f.normal
               # External source (a): faces outside the selection that touch a
               # selected vertex. Skipped when re-extruding a SurfaceUp group's
               # interior — there we only want the selected geometry to agree
               # with itself, not tilt toward whatever it sits against.
-              v.faces.each { |adj| acc << adj.normal } unless @ignore_external_context
+              next if @ignore_external_context
+              ctx = (pos_to_ctx_normals[k] ||= [])
+              v.faces.each { |adj| ctx << adj.normal }
             end
           end
         end
@@ -1380,18 +1417,25 @@ module ASM_Extensions
               n_world = Geom::Vector3d.new(*stored)
               f.vertices.each do |v|
                 k = pos_key(v.position.transform(xform))
-                next unless pos_to_normals.key?(k)
-                pos_to_normals[k] << n_world
+                next unless pos_to_sel_normals.key?(k)
+                (pos_to_ctx_normals[k] ||= []) << n_world
               end
             end
           end
         end
 
-        pos_to_normals.each_value(&:uniq!)
-
+        # Per position: the dominant normals (a coplanar run of ≥2 selected
+        # faces) and the unit displacement. When a run dominates, the offset
+        # follows it straight (transverse faces conform); `dominant_by_pos`
+        # records the run so the panel mover can tell which faces are
+        # subordinate there and keep their own offset (avoiding the bowtie).
         unit_disp_by_pos = {}
-        pos_to_normals.each do |k, ns|
-          base = Geom::Point3d.new(k[0], k[1], k[2])
+        dominant_by_pos  = {}
+        pos_to_sel_normals.each do |k, sel|
+          base     = Geom::Point3d.new(k[0], k[1], k[2])
+          dominant = parallel_clusters_with_counts(sel).select { |c| c[:count] >= 2 }.map { |c| c[:rep] }
+          dominant_by_pos[k] = dominant unless dominant.empty?
+          ns   = dominant.empty? ? (sel + (pos_to_ctx_normals[k] || [])) : dominant
           top1 = compute_offset_vertex(base, ns, 1.0)
           unit_disp_by_pos[k] = Geom::Vector3d.new(top1.x - base.x, top1.y - base.y, top1.z - base.z)
         end
@@ -1426,7 +1470,146 @@ module ASM_Extensions
           shared_edge_hard[k] = true if cos_a < cos_threshold
         end
 
-        { unit_disp_by_pos: unit_disp_by_pos, shared_edge_pos: shared_edge_pos, shared_edge_hard: shared_edge_hard }
+        { unit_disp_by_pos: unit_disp_by_pos, dominant_by_pos: dominant_by_pos,
+          miter_disp: compute_wall_miter_disp(surfaces),
+          miter_disp_inv: compute_wall_miter_disp(surfaces, true),
+          shared_edge_pos: shared_edge_pos, shared_edge_hard: shared_edge_hard }
+      end
+
+      WALL_NORMAL_Z_TOL = 0.01
+
+      def norm_key(n)
+        [n.x.round(4), n.y.round(4), n.z.round(4)]
+      end
+
+      # Per-wall miter displacements (unit, at height 1) for *consistent
+      # thickness*. Every vertical wall offsets exactly h perpendicular
+      # (pushpull already does); at a shared plan vertex a wall's offset corner
+      # slides ALONG its own offset line to meet the offset line of its nearest
+      # angular neighbour on the offset side. Because the corner stays on the
+      # wall's own offset line (perpendicular distance h), thickness is h by
+      # construction — unlike one shared equidistant vertex, which can't sit at
+      # distance h from 3+ non-coplanar walls at once. Keyed by [plan, normal]
+      # (per wall, not shared). Returns {} when the selection isn't wall-like
+      # (vertical, rectangular footprint), so callers fall back to the
+      # equidistant map. This also subsumes the run/partition logic: collinear
+      # walls give parallel offset lines → straight (no chamfer), and a
+      # partition's corner lands on the run's offset line → flush.
+      # `flip` computes the inverted-extrusion map: every wall thickens toward
+      # −n (it extrudes the other way), so the miter geometry runs with negated
+      # normals and the resulting displacement is negated back into the
+      # base + h·disp convention (move_panel multiplies by the negative h).
+      def compute_wall_miter_disp(surfaces, flip = false)
+        at = Hash.new { |h, k| h[k] = [] }
+        surfaces.each do |sf|
+          sf.each do |f|
+            n = f.normal
+            return {} unless n.z.abs < WALL_NORMAL_Z_TOL
+            noff = flip ? Geom::Vector3d.new(-n.x, -n.y, -n.z) : n
+            ordered = ordered_footprint(f)   # plan points along the wall (incl. mids)
+            next if ordered.size < 2
+            ordered.each_with_index do |vtx, i|
+              # A vertex with a neighbour on each side is a pass-through (the
+              # wall runs straight through a junction sitting mid-span); one
+              # neighbour means it's a wall end that gets mitered.
+              nbrs = []
+              nbrs << ordered[i - 1] if i > 0
+              nbrs << ordered[i + 1] if i < ordered.size - 1
+              is_end = nbrs.size == 1
+              nbrs.each do |op|
+                dir = Geom::Vector3d.new(op.x - vtx.x, op.y - vtx.y, 0)
+                next if dir.length < 1.0e-9
+                dir.normalize!
+                at[[vtx.x.round(POS_KEY_DECIMALS), vtx.y.round(POS_KEY_DECIMALS)]] <<
+                  { n: noff, kn: n, dir: dir, vtx: vtx, is_end: is_end }
+              end
+            end
+          end
+        end
+
+        result = {}
+        at.each do |pk, rays|
+          rays.each do |w|
+            if w[:is_end]
+              c  = wall_miter_corner(w, rays)
+              dx = c.x - w[:vtx].x; dy = c.y - w[:vtx].y
+            else
+              dx = w[:n].x; dy = w[:n].y   # pass-through: straight offset
+            end
+            if flip
+              dx = -dx; dy = -dy
+            end
+            result[[pk, norm_key(w[:kn])]] = Geom::Vector3d.new(dx, dy, 0)
+          end
+        end
+        result
+      end
+
+      # Plan-projected footprint vertices of a (vertical) wall face, deduped
+      # and ordered along the wall's length — so collinear mid-vertices (a
+      # redundant point, or a junction sitting mid-span) are kept in order
+      # rather than tripping the rectangular-footprint assumption.
+      def ordered_footprint(face)
+        seen = {}
+        uniq = []
+        face.outer_loop.vertices.each do |v|
+          p = v.position
+          k = [p.x.round(POS_KEY_DECIMALS), p.y.round(POS_KEY_DECIMALS)]
+          next if seen[k]
+          seen[k] = true
+          uniq << Geom::Point3d.new(p.x, p.y, 0)
+        end
+        return uniq if uniq.size < 2
+        a    = uniq.first
+        far  = uniq.max_by { |p| (p - a).length }
+        axis = far - a
+        return uniq if axis.length < 1.0e-9
+        axis.normalize!
+        uniq.sort_by { |p| (p - a).dot(axis) }
+      end
+
+      # Mitered offset corner (unit height) for wall `w` among coincident
+      # `walls`: intersect w's offset line with the offset line of its nearest
+      # angular neighbour swept from w's direction toward its +normal side.
+      # Falls back to a straight offset (V + n) when there's no usable
+      # neighbour or the offset lines are parallel (collinear run).
+      def wall_miter_corner(w, walls)
+        v = w[:vtx]; n = w[:n]; d = w[:dir]
+        straight = Geom::Point3d.new(v.x + n.x, v.y + n.y, 0)
+        ccw = (d.x * n.y - d.y * n.x) > 0   # is n 90° CCW from d?
+        best = nil; best_ang = nil
+        walls.each do |x|
+          next if x.equal?(w)
+          dx = x[:dir]
+          ang = Math.atan2(d.x * dx.y - d.y * dx.x, d.x * dx.x + d.y * dx.y)
+          a = (ccw ? ang : -ang) % (2 * Math::PI)
+          next if a < 1.0e-6 || a > 2 * Math::PI - 1.0e-6
+          if best_ang.nil? || a < best_ang
+            best_ang = a; best = x
+          end
+        end
+        return straight unless best
+
+        # Bisector of the sector between this wall and its neighbour (in the
+        # sweep direction). If the neighbour thickens INTO that sector its
+        # offset edge bounds it → miter against the neighbour's offset line;
+        # otherwise the neighbour only contributes its footprint, so our offset
+        # edge butts the neighbour's base line. Using the wrong one is what made
+        # 3+ walls overlap.
+        half = (ccw ? best_ang : -best_ang) / 2.0
+        ch = Math.cos(half); sh = Math.sin(half)
+        ux = d.x * ch - d.y * sh
+        uy = d.x * sh + d.y * ch
+        nb = best[:n]
+        thickens_in = (ux * nb.x + uy * nb.y) > 0
+
+        pi = Geom::Point3d.new(v.x + n.x, v.y + n.y, 0)
+        pj = thickens_in ? Geom::Point3d.new(v.x + nb.x, v.y + nb.y, 0) : v
+        dj = best[:dir]
+        det = dj.x * d.y - d.x * dj.y
+        return straight if det.abs < 1.0e-9
+        s = (-(pj.x - pi.x) * dj.y + dj.x * (pj.y - pi.y)) / det
+        Geom::Point3d.new(pi.x + s * d.x, pi.y + s * d.y, 0)
       end
 
       # Rounded position key — vertices on coincident geometry can have
@@ -1645,7 +1828,7 @@ module ASM_Extensions
       # the same per-panel cap the surface-style preview applies, so what gets
       # built matches what the cursor showed.
       def clamp_coordinated_panel_height(group, face, height)
-        unit_disp  = panel_coordinated_unit_disp(group, face)
+        unit_disp  = panel_coordinated_unit_disp(group, face, height.to_f < 0)
         edge_faces = Hash.new { |h, k| h[k] = [] }
         face.edges.each { |e| edge_faces[e] << face }
         active = compute_active_outer_loop_indices([face], edge_faces, true)
@@ -1657,12 +1840,13 @@ module ASM_Extensions
       # the panel's local frame (looked up by world position so it agrees with
       # neighbouring panels). Falls back to the face normal for any vertex not
       # in the coordinated map.
-      def panel_coordinated_unit_disp(group, face)
+      def panel_coordinated_unit_disp(group, face, inverted)
         xform     = group.transformation
         xform_inv = xform.inverse
+        fn_world  = face.normal.transform(xform)
         disp = {}
         face.vertices.each do |v|
-          unit_ctx = @coord_unit_disp_by_pos[pos_key(v.position.transform(xform))]
+          unit_ctx = coordinated_disp_for(pos_key(v.position.transform(xform)), fn_world, inverted)
           disp[v]  = unit_ctx ? unit_ctx.transform(xform_inv) : face.normal
         end
         disp
@@ -1678,23 +1862,52 @@ module ASM_Extensions
       def move_panel_top_to_coordinated(group, normal, height)
         xform     = group.transformation
         xform_inv = xform.inverse
+        fn_world  = normal.transform(xform)
+        inverted  = height.to_f < 0
+        # Longitudinal axis of the (vertical) panel — perpendicular to its
+        # normal in plan — along which a subordinate base end is trimmed.
+        long_world = Geom::Vector3d.new(-fn_world.y, fn_world.x, 0.0)
         verts     = group.entities.grep(Sketchup::Edge).flat_map(&:vertices).uniq
         targets   = []
         vectors   = []
         verts.each do |v|
-          base       = v.position.offset(normal, -height)   # bottom counterpart (panel-local)
-          unit_ctx   = @coord_unit_disp_by_pos[pos_key(base.transform(xform))]
-          next unless unit_ctx                               # not a coordinated top vertex
-          unit_local = unit_ctx.transform(xform_inv)
-          top = Geom::Point3d.new(base.x + height * unit_local.x,
-                                  base.y + height * unit_local.y,
-                                  base.z + height * unit_local.z)
-          vec = Geom::Vector3d.new(top.x - v.position.x, top.y - v.position.y, top.z - v.position.z)
-          next if vec.length < 1.0e-9
-          targets << v
-          vectors << vec
+          base     = v.position.offset(normal, -height)   # bottom counterpart (panel-local)
+          unit_ctx = coordinated_disp_for(pos_key(base.transform(xform)), fn_world, inverted)
+          if unit_ctx
+            unit_local = unit_ctx.transform(xform_inv)
+            top = Geom::Point3d.new(base.x + height * unit_local.x,
+                                    base.y + height * unit_local.y,
+                                    base.z + height * unit_local.z)
+            vec = Geom::Vector3d.new(top.x - v.position.x, top.y - v.position.y, top.z - v.position.z)
+            next if vec.length < 1.0e-9
+            targets << v
+            vectors << vec
+          elsif inverted
+            # Base (bottom) vertex of a subordinate panel: slide it along the
+            # panel's length into the neighbour run's offset plane, so its end
+            # cap lands flush there (matching the trimmed offset side) instead
+            # of staying at the original line and slanting across the run.
+            shift = subordinate_base_shift(v.position.transform(xform), fn_world, long_world, height)
+            next unless shift
+            targets << v
+            vectors << shift.transform(xform_inv)
+          end
         end
         group.entities.transform_by_vectors(targets, vectors) unless targets.empty?
+      end
+
+      # World shift sliding a subordinate panel's base vertex along the panel's
+      # length `long` into the dominant run's offset plane (through V + h·nD,
+      # normal nD), or nil if the vertex isn't subordinate. s = h / (long·nD).
+      def subordinate_base_shift(world_pos, fn_world, long, height)
+        dom = @coord_dominant_by_pos && @coord_dominant_by_pos[pos_key(world_pos)]
+        return nil unless dom && dom.any?
+        return nil if dom.any? { |dn| dn.parallel?(fn_world) }
+        nd  = dom.first
+        den = long.dot(nd)
+        return nil if den.abs < 1.0e-9
+        s = height / den
+        Geom::Vector3d.new(s * long.x, s * long.y, s * long.z)
       end
 
       # In-group perimeter cleanup for face mode. Drops outer-loop
@@ -2171,6 +2384,63 @@ module ASM_Extensions
       # first normal of each cluster — keeps the LSQ unbiased when one
       # cluster has more entries than another.
       PARALLEL_NORMAL_COS_THRESHOLD = 0.9994
+
+      # The coordinated unit displacement a panel should use at a world
+      # position `k`, or nil if the position isn't coordinated. When a coplanar
+      # run (≥2 aligned faces) dominates the vertex and this face isn't part of
+      # it, the face is subordinate: it gets a displacement that keeps its full
+      # thickness yet cuts its end flush into the run's plane (see
+      # `subordinate_disp`), instead of following the run's own displacement
+      # (which would shear it into a self-intersecting bowtie).
+      def coordinated_disp_for(k, face_normal_world, inverted)
+        mm = inverted ? @coord_miter_disp_inv : @coord_miter_disp
+        if mm
+          md = mm[[[k[0], k[1]], norm_key(face_normal_world)]]
+          return md if md
+        end
+        disp = @coord_unit_disp_by_pos[k]
+        return nil unless disp
+        dom = @coord_dominant_by_pos && @coord_dominant_by_pos[k]
+        if dom && dom.any? && dom.none? { |dn| dn.parallel?(face_normal_world) }
+          return subordinate_disp(face_normal_world, dom, inverted)
+        end
+        disp
+      end
+
+      # Displacement for a subordinate panel's dominated vertex: one unit off
+      # the panel's own plane (`disp·nI = 1`, so the panel keeps full thickness)
+      # and flush into the neighbour run's plane. Which run plane: its base
+      # (`disp·nD = 0`) for a forward extrusion, or its *offset* plane
+      # (`disp·nD = 1`) when inverted — because then the run slides inward by
+      # the distance and the panel's end must follow it, or it leaves a
+      # distance-sized gap. Solving `disp·nI = 1`, `disp·nD = t` in the nI–nD
+      # plane gives a = (1 − t·c)/(1 − c²), b = t − a·c (c = nI·nD).
+      def subordinate_disp(face_normal, dominants, inverted)
+        nd    = dominants.first
+        c     = face_normal.dot(nd)
+        denom = 1.0 - c * c
+        return face_normal if denom < 1.0e-6
+        t = inverted ? 1.0 : 0.0
+        a = (1.0 - t * c) / denom
+        b = t - a * c
+        Geom::Vector3d.new(a * face_normal.x + b * nd.x,
+                           a * face_normal.y + b * nd.y,
+                           a * face_normal.z + b * nd.z)
+      end
+
+      # Cluster near-parallel vectors, counting how many fell into each.
+      def parallel_clusters_with_counts(normals)
+        clusters = []
+        normals.each do |n|
+          c = clusters.find { |cl| cl[:rep].dot(n) > PARALLEL_NORMAL_COS_THRESHOLD }
+          if c
+            c[:count] += 1
+          else
+            clusters << { rep: n, count: 1 }
+          end
+        end
+        clusters
+      end
 
       def dedupe_parallel_normals(normals)
         clusters = []
