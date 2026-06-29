@@ -194,6 +194,11 @@ module ASM_Extensions
         @frozen_point        = nil
         @pending_commit_distance = nil
         @axis_lock           = nil
+        @normal_lock         = false   # experimental: lock extrusion to a face normal
+        @normal_origin       = nil     # the clicked point on the original face (origin)
+        @normal_dir          = nil     # that face's world normal (the locked axis)
+        @hover_point         = nil     # current snap point on an original face (orange dot)
+        @hover_normal        = nil
         # Seed the flip flag from the (possibly remembered, possibly negative)
         # default distance so it stays in sync with the actual direction.
         # Otherwise typing a length or dragging after Tab derives the sign
@@ -272,6 +277,11 @@ module ASM_Extensions
         @frozen_point        = nil
         @pending_commit_distance = nil
         @axis_lock           = nil
+        @normal_lock         = false   # experimental: lock extrusion to a face normal
+        @normal_origin       = nil     # the clicked point on the original face (origin)
+        @normal_dir          = nil     # that face's world normal (the locked axis)
+        @hover_point         = nil     # current snap point on an original face (orange dot)
+        @hover_normal        = nil
         @v_ip                = nil
         stop_ctrl_poll_timer
         view.invalidate
@@ -374,10 +384,21 @@ module ASM_Extensions
           draw_extrusion_preview(view)
         end
         draw_orange_line(view)
-        @cursor_ip.draw(view) if @cursor_ip.display?
+        draw_normal_lock(view)
+        # Suppress the cursor's snap indicator while normal-locked — movement is
+        # purely along the line, so off-line snaps must not be shown.
+        @cursor_ip.draw(view) if @cursor_ip.display? && !@normal_lock
       end
 
       def onLButtonDown(flags, x, y, view)
+        # Experimental: clicking the orange point (cursor resting on a selected
+        # face) locks the extrusion to that face's normal axis, anchored there —
+        # from any non-locked state, even mid/after a reference measurement.
+        if !@normal_lock && @hover_point
+          activate_normal_lock(view, x, y)
+          update_status_text
+          return
+        end
         if @distance_frozen
           # A distance is already marked: this click starts a NEW measurement
           # — it becomes the start point and the next click marks the end. The
@@ -459,6 +480,7 @@ module ASM_Extensions
         sync_inference_lock(flags, view)
         pick_cursor(view, x, y)
         update_v_ip
+        update_hover_point
 
         if @anchor_set && !@distance_frozen
           @extrusion_distance = compute_pick_distance(@cursor_ip)
@@ -541,6 +563,48 @@ module ASM_Extensions
           new_v.copy!(@cursor_ip)
           @v_ip = new_v
         end
+      end
+
+      # Experimental normal-lock hover: when the cursor rests on one of the
+      # original (selected) faces, remember the picked point and that face's
+      # world normal, so draw() shows the orange dot and a click can lock the
+      # extrusion to the normal axis through it. Cleared while the lock is held.
+      def update_hover_point
+        @hover_point  = nil
+        @hover_normal = nil
+        # Offered in any non-locked state: resting on a selected face and
+        # clicking it enters the normal lock (see onLButtonDown), even after a
+        # reference measurement is already under way or frozen.
+        return if @normal_lock
+        f = @cursor_ip.face
+        return unless f && @selected_faces.include?(f)
+        n = f.normal.transform(@cursor_ip.transformation)
+        return if n.length < 1.0e-9
+        @hover_point  = @cursor_ip.position
+        @hover_normal = n.normalize
+      end
+
+      # Lock the extrusion to the hovered face's normal, anchored at the clicked
+      # point. From here the cursor is projected onto that normal line and the
+      # distance is its signed offset (so the extrusion runs both ways). ESC
+      # (reset_pick_state) clears the lock.
+      def activate_normal_lock(view, x, y)
+        @normal_lock   = true
+        @normal_origin = @hover_point
+        @normal_dir    = @hover_normal
+        @anchor_ip.pick(view, x, y)   # anchor coincides with the orange point
+        @cursor_ip.pick(view, x, y)
+        @anchor_set      = true
+        @distance_frozen = false      # drop any reference measurement in progress
+        @frozen_point    = nil
+        @pending_commit_distance = nil
+        @flip_direction  = false      # sign now comes from the cursor projection
+        @hover_point     = nil
+        @hover_normal    = nil
+        @extrusion_distance = 0.to_l
+        update_vcb(nil, @extrusion_distance.to_s)
+        view.invalidate
+        Debug.log(self.class, __method__, "Normal lock @#{@normal_origin}, dir #{@normal_dir}")
       end
 
       # Reconcile the inference lock with the live Shift modifier bit. SketchUp's
@@ -636,6 +700,11 @@ module ASM_Extensions
         @frozen_point        = nil
         @pending_commit_distance = nil
         @axis_lock           = nil
+        @normal_lock         = false   # experimental: lock extrusion to a face normal
+        @normal_origin       = nil     # the clicked point on the original face (origin)
+        @normal_dir          = nil     # that face's world normal (the locked axis)
+        @hover_point         = nil     # current snap point on an original face (orange dot)
+        @hover_normal        = nil
         @v_ip                = nil
         @anchor_ip           = Sketchup::InputPoint.new
       end
@@ -2793,6 +2862,11 @@ module ASM_Extensions
         @frozen_point        = nil
         @pending_commit_distance = nil
         @axis_lock           = nil
+        @normal_lock         = false   # experimental: lock extrusion to a face normal
+        @normal_origin       = nil     # the clicked point on the original face (origin)
+        @normal_dir          = nil     # that face's world normal (the locked axis)
+        @hover_point         = nil     # current snap point on an original face (orange dot)
+        @hover_normal        = nil
         @v_ip                = nil
         @inference_lock_held = false
         @flip_direction      = false
@@ -2884,6 +2958,30 @@ module ASM_Extensions
         draw_frozen_marker(view, @frozen_point, @anchor_ip.position) if @frozen_point
       end
 
+      # Experimental normal lock: an orange dot where the cursor rests on an
+      # original face (before locking), then — once locked — the face normal as
+      # a guide line through the origin in both directions, drawn on top.
+      def draw_normal_lock(view)
+        if @hover_point && !@normal_lock
+          draw_inference_circle(view, @hover_point, ORANGE)
+          return
+        end
+        return unless @normal_lock && @normal_origin && @normal_dir
+        len = view.pixels_to_model(3000, @normal_origin)
+        a   = @normal_origin.offset(@normal_dir,  len)
+        b   = @normal_origin.offset(@normal_dir, -len)
+        view.line_width    = 1
+        view.line_stipple  = "."
+        view.drawing_color = Sketchup::Color.new('black')
+        view.draw(GL_LINES, a, b)
+        view.line_stipple  = ""
+        draw_inference_circle(view, @normal_origin, ORANGE)
+        # Distance marker: where the cursor projects onto the normal line — the
+        # point the extrusion currently reaches. Slides as the mouse moves.
+        ecp = effective_cursor_position(view)
+        draw_inference_circle(view, ecp, ORANGE) if ecp
+      end
+
       def draw_anchor_dot(view)
         return unless @anchor_ip.valid?
         if @anchor_set
@@ -2963,6 +3061,18 @@ module ASM_Extensions
       # @cursor_ip.position otherwise. SketchUp's native inference lock (Shift)
       # is honored by @cursor_ip itself — no projection needed here.
       def effective_cursor_position(view = nil)
+        # Normal lock: map the cursor's SCREEN RAY onto the normal line and take
+        # the closest point. Movement is purely along the line — geometry the
+        # cursor happens to snap to (vertices/edges/faces off the line) is
+        # ignored, so nothing off the line can pull the distance.
+        if @normal_lock && @normal_origin && @normal_dir
+          v = view || @current_view
+          if v && @cursor_screen
+            ray = v.pickray(@cursor_screen.x, @cursor_screen.y)
+            t   = closest_point_on_axis(@normal_origin, @normal_dir, ray[0], ray[1])
+            return @normal_origin.offset(@normal_dir, t)
+          end
+        end
         return nil unless @cursor_ip.valid?
         return @cursor_ip.position unless @axis_lock && @anchor_ip.valid?
 
@@ -3000,6 +3110,17 @@ module ASM_Extensions
       end
 
       def compute_pick_distance(target_ip)
+        # Normal lock: signed offset along the normal from the origin (so the
+        # extrusion runs both ways without needing Tab). Uses the screen-ray
+        # projection (effective_cursor_position), not the snapped cursor point.
+        if @normal_lock && @normal_origin && @normal_dir
+          ecp = effective_cursor_position(@current_view)
+          if ecp
+            t = (ecp - @normal_origin).dot(@normal_dir)
+            return (@flip_direction ? -t : t).to_l
+          end
+          return @extrusion_distance
+        end
         return @extrusion_distance unless @anchor_ip.valid? && target_ip.valid?
         endpoint = effective_cursor_position(@current_view) || target_ip.position
         vec      = endpoint - @anchor_ip.position
