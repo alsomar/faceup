@@ -1228,9 +1228,39 @@ module ASM_Extensions
               # result), but its outline edges are real and must still be drawn.
               # So mark it — the draw skips the fill but keeps the outline.
               # SurfaceUp's executor builds walls on its seams, so seam = false
-              # there and the wall stays.
-              seam = !!(@mode == :face && coord && coord[:shared_edge_pos] &&
-                        coord[:shared_edge_pos][edge_pos_key(v1.position, v2.position)])
+              # there and the wall stays. But suppress the wall ONLY when this
+              # panel actually coordinates at the seam — either it continues a
+              # same-orientation run (a parallel-normal neighbour shares the
+              # edge) or it is subordinate (mitred flush into a dominant run).
+              # Otherwise (e.g. two faces of opposite/crossing orientation
+              # meeting at a corner) the panels stay separate boxes and the
+              # canto is a real exposed face, so its wall must be drawn.
+              epk    = edge_pos_key(v1.position, v2.position)
+              shared = @mode == :face && coord && coord[:shared_edge_pos] &&
+                       coord[:shared_edge_pos][epk]
+              coordinated = false
+              if shared
+                vk    = pos_key(v1.position)
+                inv   = @extrusion_distance.to_f < 0
+                mm    = inv ? coord[:miter_disp_inv] : coord[:miter_disp]
+                norms = coord[:shared_edge_normals] && coord[:shared_edge_normals][epk]
+                my    = mm && mm[[[vk[0], vk[1]], norm_key(face.normal)]]
+                # A neighbour panel's offset corner coincides with this one — a
+                # same-orientation run continuing, or a clean mitre meeting at
+                # the same apex — so the canto is internal/coincident (count >= 2
+                # includes self). Otherwise the offsets diverge (crossing corner)
+                # and the canto is exposed.
+                coincide = !!(my && norms && norms.count { |nn|
+                  d = mm[[[vk[0], vk[1]], norm_key(nn)]]
+                  d && (d.x - my.x).abs < 1.0e-4 && (d.y - my.y).abs < 1.0e-4
+                } >= 2)
+                # Or this panel is subordinate — mitred flush into a dominant
+                # run, so its cap is coplanar with the run and hidden.
+                dom = coord[:dominant_by_pos] && coord[:dominant_by_pos][vk]
+                subordinate = dom && dom.any? && !dom.any? { |dn| dn.parallel?(face.normal) }
+                coordinated = coincide || subordinate
+              end
+              seam = !!(shared && coordinated)
               # A subordinate panel's END CAP — the vertical edge at a junction
               # where the trimmed base meets the neighbour run — lands coplanar
               # with the run's inner face, so its WALL would show a stray gray
@@ -1549,13 +1579,15 @@ module ASM_Extensions
           end
         end
 
-        shared_edge_pos  = {}
-        shared_edge_hard = {}
-        cos_threshold    = 0.5
+        shared_edge_pos     = {}
+        shared_edge_hard    = {}
+        shared_edge_normals = {}
+        cos_threshold       = 0.5
         edge_to_groups.each do |k, gset|
           next if gset.size < 2
           shared_edge_pos[k] = true
           gis = gset.keys
+          shared_edge_normals[k] = gis.map { |gi| edge_to_faces[k][gi].normal }
           n1 = edge_to_faces[k][gis[0]].normal
           n2 = edge_to_faces[k][gis[1]].normal
           cos_a = n1.dot(n2)
@@ -1567,7 +1599,8 @@ module ASM_Extensions
         { unit_disp_by_pos: unit_disp_by_pos, dominant_by_pos: dominant_by_pos,
           miter_disp: compute_wall_miter_disp(surfaces),
           miter_disp_inv: compute_wall_miter_disp(surfaces, true),
-          shared_edge_pos: shared_edge_pos, shared_edge_hard: shared_edge_hard }
+          shared_edge_pos: shared_edge_pos, shared_edge_hard: shared_edge_hard,
+          shared_edge_normals: shared_edge_normals }
       end
 
       WALL_NORMAL_Z_TOL = 0.01
