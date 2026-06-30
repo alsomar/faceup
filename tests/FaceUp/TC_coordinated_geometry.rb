@@ -71,6 +71,14 @@ module ASM_Extensions
         end
       end
 
+      # A horizontal cap face from plan corners at height `z`, reversed so its
+      # normal points toward ±z per `want_z`.
+      def cap(corners, want_z, z = 20)
+        f = @group.entities.add_face(corners.map { |c| Geom::Point3d.new(c[0], c[1], z) })
+        f.reverse! if f.normal.z * want_z < 0
+        f
+      end
+
       # Run coordinated FaceUp on `faces`, return the result groups.
       def extrude(faces, height)
         t = FaceUpTool.new
@@ -137,6 +145,21 @@ module ASM_Extensions
         verts = base_verts_near(groups, [-12, -12], 3)
         assert vertex_at?(verts, [-12, -12], 1.0),
                'subdivided wall L-corner should miter to the diagonal (-12,-12), not butt straight'
+      end
+
+      # A vertical-wall RUN (two collinear walls = a dominant run) meeting a
+      # horizontal cap at the shared top edge is a MIXED junction. Dominant-run
+      # straightening is a vertical-wall behaviour and must NOT pull the cap
+      # along the wall direction — that would leave the cap with zero
+      # perpendicular thickness (sheared flat). The full equidistant keeps every
+      # face at thickness h, so all three panels stay solid.
+      def test_wall_run_plus_cap_keeps_cap_thickness
+        wa = wall([-30, 0], [0, 0], [0, -1], 20)
+        wb = wall([0, 0], [30, 0], [0, -1], 20)
+        cp = cap([[0, 0], [30, 0], [30, -20], [0, -20]], 1)
+        groups = extrude([wa, wb, cp], 5)
+        assert groups.all?(&:manifold?), 'wall-run + cap should be manifold'
+        assert_equal [5.0, 5.0, 5.0], thicknesses(groups).sort
       end
 
       def test_y_junction_three_walls_consistent_thickness

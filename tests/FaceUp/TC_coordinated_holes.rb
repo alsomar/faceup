@@ -318,6 +318,23 @@ module ASM_Extensions
                'a near-parallel subordinate must be flagged so the caller falls back to the shared offset'
       end
 
+      # The subordinate model is a vertical-wall concept; on mixed geometry
+      # (walls + slanted/horizontal faces) it must only fire for genuine wall
+      # partitions, else slanted faces offset off-normal and gap.
+      def test_wall_subordinate_only_for_vertical_partitions
+        vdom = [vec(1, 0, 0)]
+        assert @tool.send(:wall_subordinate?, [vec(0, 1, 0)], vdom),
+               'a vertical partition perpendicular to a vertical run is subordinate'
+        refute @tool.send(:wall_subordinate?, [vec(0, -0.71, 0.71)], vdom),
+               'a slanted face is NOT subordinate — it would gap; it uses the shared offset'
+        refute @tool.send(:wall_subordinate?, [vec(1, 0, 0)], vdom),
+               'a face parallel to the run is part of it, not subordinate'
+        refute @tool.send(:wall_subordinate?, [vec(0, 1, 0)], [vec(0.6, 0, 0.8)]),
+               'a non-vertical dominant run disables the subordinate model'
+        refute @tool.send(:wall_subordinate?, [vec(0, 1, 0)], nil),
+               'no dominant run → not subordinate'
+      end
+
     end
   end
 end

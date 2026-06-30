@@ -1254,7 +1254,7 @@ module ASM_Extensions
                 disp = md
               else
                 dom = coord[:dominant_by_pos] && coord[:dominant_by_pos][k]
-                subordinate = dom && dom.any? && vf.none? { |f| dom.any? { |dn| dn.parallel?(f.normal) } }
+                subordinate = wall_subordinate?(vf.map(&:normal), dom)
                 shared = coord[:unit_disp_by_pos][k]
                 if subordinate
                   sd   = subordinate_disp(vf.first.normal, dom, inv)
@@ -1678,13 +1678,25 @@ module ASM_Extensions
         # follows it straight (transverse faces conform); `dominant_by_pos`
         # records the run so the panel mover can tell which faces are
         # subordinate there and keep their own offset (avoiding the bowtie).
+        #
+        # Dominant-run straightening is a VERTICAL-WALL behaviour: it follows the
+        # run and lets transverse partitions conform. Apply it only at a pure
+        # vertical-wall junction. If any face here is slanted or horizontal (a
+        # faceted shell, a cap, a sloped transition), use the FULL equidistant
+        # instead — a point at perpendicular distance 1 from every face plane, so
+        # each face thickens perpendicular to itself and they meet. Dominant-only
+        # there would offset along the run direction, leaving the slants at zero
+        # perpendicular thickness (sheared flat).
         unit_disp_by_pos = {}
         dominant_by_pos  = {}
         pos_to_sel_normals.each do |k, sel|
           base     = Geom::Point3d.new(k[0], k[1], k[2])
+          all_here = sel + (pos_to_ctx_normals[k] || [])
           dominant = parallel_clusters_with_counts(sel).select { |c| c[:count] >= 2 }.map { |c| c[:rep] }
-          dominant_by_pos[k] = dominant unless dominant.empty?
-          ns   = dominant.empty? ? (sel + (pos_to_ctx_normals[k] || [])) : dominant
+          wall_junction = all_here.all? { |n| n.z.abs < WALL_NORMAL_Z_TOL }
+          use_dominant  = wall_junction && !dominant.empty?
+          dominant_by_pos[k] = dominant if use_dominant
+          ns   = use_dominant ? dominant : all_here
           top1 = compute_offset_vertex(base, ns, 1.0)
           unit_disp_by_pos[k] = Geom::Vector3d.new(top1.x - base.x, top1.y - base.y, top1.z - base.z)
         end
@@ -2208,8 +2220,7 @@ module ASM_Extensions
       # subordinate_base_shift (s·long, s = h/(long·nD)).
       def preview_base_disp(world_pos, fn, coord)
         dom = coord[:dominant_by_pos] && coord[:dominant_by_pos][pos_key(world_pos)]
-        return nil unless dom && dom.any?
-        return nil if dom.any? { |dn| dn.parallel?(fn) }
+        return nil unless wall_subordinate?([fn], dom)
         nd   = dom.first
         long = Geom::Vector3d.new(-fn.y, fn.x, 0.0)
         den  = long.dot(nd)
@@ -2751,11 +2762,26 @@ module ASM_Extensions
         disp = @coord_unit_disp_by_pos[k]
         return nil unless disp
         dom = @coord_dominant_by_pos && @coord_dominant_by_pos[k]
-        if dom && dom.any? && dom.none? { |dn| dn.parallel?(face_normal_world) }
+        if wall_subordinate?([face_normal_world], dom)
           sd = subordinate_disp(face_normal_world, dom, inverted)
           return subordinate_overshoots?(sd) ? disp : sd
         end
         disp
+      end
+
+      # The subordinate-panel model (a wall flush into a dominant run) is a
+      # VERTICAL-WALL concept: it slides a partition along the run's offset line
+      # in plan. It applies only when both the face and the dominant run are
+      # vertical walls AND the face isn't itself part of the run. A slanted or
+      # horizontal face (a faceted slope's transition, a cap) is not a partition
+      # — pushing it through subordinate_disp offsets it along its tilted normal,
+      # away from the run's offset plane, opening a gap. Those instead fall back
+      # to the shared per-position offset (matching SurfaceUp), so they meet.
+      def wall_subordinate?(face_normals, dom)
+        return false unless dom && dom.any?
+        return false unless face_normals.all? { |n| n.z.abs < WALL_NORMAL_Z_TOL }
+        return false unless dom.all? { |dn| dn.z.abs < WALL_NORMAL_Z_TOL }
+        face_normals.none? { |n| dom.any? { |dn| dn.parallel?(n) } }
       end
 
       # Displacement for a subordinate panel's dominated vertex: one unit off
