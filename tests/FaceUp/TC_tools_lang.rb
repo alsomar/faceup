@@ -11,10 +11,14 @@ module ASM_Extensions
         status_idle
         status_pick
         status_adjust
-        status_flipped
         status_both_sides
+        tab_flip
         no_faces
         invalid_length
+        ctrl_mode
+        mode_coordinated
+        mode_normal
+        no_external_context
       ].freeze
 
       SUMMON_FACES_KEYS = %i[
@@ -71,32 +75,12 @@ module ASM_Extensions
         refute_equal en, es, "vcb_label should differ between en-US and es-ES"
       end
 
-      def test_status_flipped_differs_between_locales
-        Lang.configure("en-US")
-        en = Lang.t(:tools, :faceup, :status_flipped)
-        Lang.configure("es-ES")
-        es = Lang.t(:tools, :faceup, :status_flipped)
-        refute_equal en, es, "status_flipped should differ between en-US and es-ES"
-      end
-
       def test_status_idle_differs_between_locales
         Lang.configure("en-US")
         en = Lang.t(:tools, :faceup, :status_idle)
         Lang.configure("es-ES")
         es = Lang.t(:tools, :faceup, :status_idle)
         refute_equal en, es, "status_idle should differ between en-US and es-ES"
-      end
-
-      # --- Content sanity ---
-
-      def test_status_flipped_en_contains_flipped
-        Lang.configure("en-US")
-        assert_match(/FLIPPED/i, Lang.t(:tools, :faceup, :status_flipped))
-      end
-
-      def test_status_flipped_es_contains_invertido
-        Lang.configure("es-ES")
-        assert_match(/INVERTIDO/i, Lang.t(:tools, :faceup, :status_flipped))
       end
 
       # --- tools.summon_faces keys ---

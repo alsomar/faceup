@@ -16,7 +16,7 @@ module ASM_Extensions
             },
             surfaceup: {
               label:   "SurfaceUp",
-              tooltip: "SurfaceUp (experimental)",
+              tooltip: "SurfaceUp (beta)",
               status:  "Extrudes selected faces as welded surfaces — adjacent faces stay fused along their soft edges."
             },
             turbo: {
@@ -68,10 +68,6 @@ module ASM_Extensions
               txt2:    "Community support is what makes independent projects like #{EXT_NAME} possible. If you can, please consider making a contribution through #{LINK_PATREON} or #{LINK_KOFI}. Thank you so much in advance!",
               txt3:    "Thank you for your generosity!",
               txt4:    "Sincerely,"
-            },
-            buttons: {
-              save_settings:  "Save Settings",
-              settings_saved: "Settings Saved"
             }
           },
 
@@ -81,14 +77,18 @@ module ASM_Extensions
               no_selection: "There's nothing selected.",
             },
             faceup: {
-              vcb_label:      "Length: ",
-              status_idle:    "FaceUp: Enter distance or click to set origin | Tab to flip direction | Enter/DblClick to confirm | Space to cancel",
-              status_pick:    "FaceUp: Click to set distance | Tab to flip direction | ESC to reset origin | Space to cancel",
-              status_adjust:  "FaceUp: Click to adjust | Tab to flip direction | Enter/DblClick to confirm | ESC to reset origin | Space to cancel",
-              status_flipped: " [FLIPPED]",
+              vcb_label:      "Length ",
+              status_idle:    "Click to set the extrusion origin or enter a length",
+              status_pick:    "Click to set the extrusion or enter a length",
+              status_adjust:  "Click to adjust the extrusion or enter a length",
               status_both_sides: " [BOTH SIDES]",
+              tab_flip:       "Tab = flip direction",
               no_faces:       "No faces selected.",
-              invalid_length: "Invalid length. Please enter a valid distance.",
+              invalid_length: "Invalid length.",
+              ctrl_mode:           "Ctrl = Extrusion mode",
+              mode_coordinated:    "(COORDINATED)",
+              mode_normal:         "(NORMAL)",
+              no_external_context: "(no external context)",
             }
           }
 

@@ -726,29 +726,21 @@ module ASM_Extensions
       end
 
       def update_status_text
-        dir = if @both_sides
-          Lang.t(:tools, :faceup, :status_both_sides)
-        elsif @flip_direction
-          Lang.t(:tools, :faceup, :status_flipped)
+        dir = @both_sides ? Lang.t(:tools, :faceup, :status_both_sides) : ""
+        coord_hint = if @mode == :surface || @mode == :face
+          mode = @coordinated_extrusion ? Lang.t(:tools, :faceup, :mode_coordinated) : Lang.t(:tools, :faceup, :mode_normal)
+          ext  = (@mode == :surface && @ignore_external_context) ? " #{Lang.t(:tools, :faceup, :no_external_context)}" : ""
+          " | #{Lang.t(:tools, :faceup, :ctrl_mode)} #{mode}#{ext}"
         else
           ""
         end
-        coord_hint = if @mode == :surface
-          tag = @coordinated_extrusion ? " [COORDINADO]" : ""
-          ext = @ignore_external_context ? " (sin contexto externo)" : ""
-          " | Ctrl: alternar coordinado/independiente#{tag}#{ext}"
-        elsif @mode == :face
-          tag = @coordinated_extrusion ? " [COORDINADO]" : ""
-          " | Ctrl: alternar coordinado/independiente#{tag}"
-        else
-          ""
-        end
+        tab = " | #{Lang.t(:tools, :faceup, :tab_flip)}"
         @status_text = if @distance_frozen
-          "#{Lang.t(:tools, :faceup, :status_adjust)}#{dir}#{coord_hint}"
+          "#{Lang.t(:tools, :faceup, :status_adjust)}#{tab}#{dir}#{coord_hint}"
         elsif !@anchor_set
-          "#{Lang.t(:tools, :faceup, :status_idle)}#{dir}#{coord_hint}"
+          "#{Lang.t(:tools, :faceup, :status_idle)}#{tab}#{dir}#{coord_hint}"
         else
-          "#{Lang.t(:tools, :faceup, :status_pick)}#{dir}#{coord_hint}"
+          "#{Lang.t(:tools, :faceup, :status_pick)}#{tab}#{dir}#{coord_hint}"
         end
         Sketchup::set_status_text(@status_text)
       end

@@ -16,7 +16,7 @@ module ASM_Extensions
             },
             surfaceup: {
               label:   "SurfaceUp",
-              tooltip: "SurfaceUp (experimental)",
+              tooltip: "SurfaceUp (beta)",
               status:  "Extruye las caras seleccionadas como superficies soldadas — las caras adyacentes quedan fusionadas por sus aristas suaves."
             },
             turbo: {
@@ -68,10 +68,6 @@ module ASM_Extensions
               txt2:    "El apoyo de la comunidad es lo que hace posible proyectos como #{EXT_NAME}. Si puedes, considera contribuir a través de #{LINK_PATREON} o #{LINK_KOFI}.",
               txt3:    "¡Gracias por tu generosidad!",
               txt4:    "Atentamente,"
-            },
-            buttons: {
-              save_settings:  "Guardar ajustes",
-              settings_saved: "Ajustes guardados"
             }
           },
 
@@ -81,14 +77,18 @@ module ASM_Extensions
               no_selection: "No hay nada seleccionado.",
             },
             faceup: {
-              vcb_label:      "Longitud: ",
-              status_idle:    "FaceUp: Introduce una distancia o haz clic para fijar el origen | Tab para invertir | Enter/DblClic para confirmar | Espacio para cancelar",
-              status_pick:    "FaceUp: Haz clic para fijar la distancia | Tab para invertir | ESC para restablecer el origen | Espacio para cancelar",
-              status_adjust:  "FaceUp: Haz clic para ajustar | Tab para invertir | Enter/DblClic para confirmar | ESC para restablecer el origen | Espacio para cancelar",
-              status_flipped: " [INVERTIDO]",
+              vcb_label:      "Longitud ",
+              status_idle:    "Haz clic para fijar el origen de la extrusión o introduce una longitud",
+              status_pick:    "Haz clic para fijar la extrusión o introduce una longitud",
+              status_adjust:  "Haz clic para ajustar la extrusión o introduce una longitud",
               status_both_sides: " [AMBOS LADOS]",
+              tab_flip:       "Tab = Invierte el sentido",
               no_faces:       "No hay caras seleccionadas.",
-              invalid_length: "Longitud no válida. Introduce una distancia correcta.",
+              invalid_length: "Longitud no válida.",
+              ctrl_mode:           "Ctrl = Modo de extrusión",
+              mode_coordinated:    "(COORDINADA)",
+              mode_normal:         "(NORMAL)",
+              no_external_context: "(sin contexto externo)",
             }
           }
 
