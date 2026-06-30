@@ -295,6 +295,29 @@ module ASM_Extensions
         assert_point pt(2, 2, 10), top
       end
 
+      # ── Subordinate offset cap ────────────────────────────────────────────
+      # subordinate_disp = 1/sin(angle) off the dominant run, so a near-parallel
+      # subordinate (a faceted slope where two facets are almost coplanar) shoots
+      # far sideways and twists the panel top. The cap must catch that and the
+      # caller falls back to the shared offset.
+
+      def test_subordinate_disp_bounded_when_perpendicular
+        # A real wall partition meets its run at 90°: |disp| == 1, not flagged.
+        d = @tool.send(:subordinate_disp, vec(0, 1, 0), [vec(1, 0, 0)], false)
+        assert_in_delta 1.0, d.length, 1e-6
+        refute @tool.send(:subordinate_overshoots?, d)
+      end
+
+      def test_subordinate_disp_overshoots_when_near_parallel
+        # ~20° off the dominant run → |disp| = 1/sin(20°) ≈ 2.9, past the cap.
+        a  = 20 * Math::PI / 180.0
+        fn = vec(Math.cos(a), Math.sin(a), 0)
+        d  = @tool.send(:subordinate_disp, fn, [vec(1, 0, 0)], false)
+        assert d.length > 2.0, "20-deg subordinate should overshoot (got #{d.length.round(2)})"
+        assert @tool.send(:subordinate_overshoots?, d),
+               'a near-parallel subordinate must be flagged so the caller falls back to the shared offset'
+      end
+
     end
   end
 end

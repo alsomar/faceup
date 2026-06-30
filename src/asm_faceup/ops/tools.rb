@@ -2779,15 +2779,22 @@ module ASM_Extensions
                            a * face_normal.z + b * nd.z)
       end
 
-      # subordinate_disp blows up (a = 1/(1 − c²) → ∞) as the subordinate face
-      # approaches parallel with the dominant run — a faceted sphere's poles,
-      # where every face is near-parallel to the near-flat cap run. Past the
-      # overshoot cap there is no usable subordinate miter, so the caller must
-      # fall back to the *shared* per-position offset (unit_disp_by_pos), not
-      # the face's own normal: every face at that vertex then agrees on one top
-      # point and the panels stay joined instead of splaying into gaps.
+      # subordinate_disp's magnitude is 1/√(1−c²) (c = subordinate·dominant), so
+      # it grows fast as the subordinate face approaches parallel with the
+      # dominant run: 1.0 at 90°, 1.41 at 45°, 2.0 at 30°, ~3 at 20°, →∞ at 0°.
+      # Past ~30° of separation the "subordinate panel flush into a run" model
+      # degenerates — the face is nearly coplanar with the run, so the flush
+      # projection shoots far sideways and twists the panel top (faceted sphere
+      # poles overshot to ~29x; a faceted slope twisted two panels at ~2.8). When
+      # it overshoots, the caller falls back to the SHARED per-position offset
+      # (unit_disp_by_pos), not the face's own normal: every face at that vertex
+      # then agrees on one top point and the panels stay joined instead of
+      # splaying into gaps. The cap is lower than OFFSET_OVERSHOOT_CAP (which
+      # guards the equidistant LSQ, where a sharp valid corner legitimately
+      # reaches 2–3) because a subordinate at <30° is already degenerate.
+      SUBORDINATE_DISP_CAP = 2.0
       def subordinate_overshoots?(disp)
-        disp.length > OFFSET_OVERSHOOT_CAP
+        disp.length > SUBORDINATE_DISP_CAP
       end
 
       # Cluster near-parallel vectors, counting how many fell into each.
