@@ -357,9 +357,11 @@ module ASM_Extensions
           lo, hi = preview_offsets
           @preview_cache.each do |data|
             n = data[:normal]
-            data[:loop_pts].each do |p|
-              bb.add(p.offset(n, lo))
-              bb.add(p.offset(n, hi))
+            data[:loops].each do |lp|
+              lp.each do |p|
+                bb.add(p.offset(n, lo))
+                bb.add(p.offset(n, hi))
+              end
             end
           end
         end
@@ -805,7 +807,7 @@ module ASM_Extensions
         return unless show_preview_outlines?
 
         view.drawing_color = PREVIEW_BLUE
-        @preview_cache.each { |data| view.draw(GL_LINE_LOOP, lift_off_face(data[:loop_pts], view, 5)) }
+        @preview_cache.each { |data| data[:loops].each { |lp| view.draw(GL_LINE_LOOP, lift_off_face(lp, view, 5)) } }
       end
 
       # Normal lift is [0, dist]; "both sides" straddles the face plane at
@@ -891,10 +893,12 @@ module ASM_Extensions
         # its fill) stays blue; the offset loop (the new top) is orange.
         @preview_cache.each do |data|
           n = data[:normal]
-          view.drawing_color = ORANGE
-          view.draw(GL_LINE_LOOP, lift_off_face(data[:loop_pts].map { |p| p.offset(n, hi) }, view, 5))
-          view.drawing_color = PREVIEW_BLUE
-          view.draw(GL_LINE_LOOP, lift_off_face(data[:loop_pts].map { |p| p.offset(n, lo) }, view, 5))
+          data[:loops].each do |loop_pts|
+            view.drawing_color = ORANGE
+            view.draw(GL_LINE_LOOP, lift_off_face(loop_pts.map { |p| p.offset(n, hi) }, view, 5))
+            view.drawing_color = PREVIEW_BLUE
+            view.draw(GL_LINE_LOOP, lift_off_face(loop_pts.map { |p| p.offset(n, lo) }, view, 5))
+          end
         end
 
         # Top and vertical hard edges — new, so orange.
@@ -960,7 +964,11 @@ module ASM_Extensions
           dist = hi if hi && dist > hi
           dist = lo if lo && dist < lo
 
-          hole_scale = coordinated_face_hole_scale(group, dist)
+          # Only taper the holes when the panel is capped at its converging tip
+          # (dist clamped below the requested distance), matching the executor —
+          # otherwise the holes stay straight perpendicular shafts.
+          converging = dist.to_f.abs < raw_dist.to_f.abs - 1.0e-6
+          hole_scale = converging ? coordinated_face_hole_scale(group, dist) : nil
 
           group[:tris].each do |tri|
             bottom = tri.map { |meta| surface_meta_bottom(meta, vert_base_disp, vert_pos, dist) }
@@ -1181,21 +1189,26 @@ module ASM_Extensions
       def build_independent_face_preview_cache(faces)
         faces.map do |face|
           mesh  = face.mesh(7)
-          verts = face.outer_loop.vertices
-          edges = face.outer_loop.edges
-          kept  = simplifiable_kept_indices(verts, edges)
-          kept_pts = kept.map { |i| verts[i].position }
+          loops      = []
           hard_edges = []
-          kept.length.times do |k|
-            e = edges[kept[k]]
-            next if e.soft? || e.curve
-            i_next = kept[(k + 1) % kept.length]
-            hard_edges << [verts[kept[k]].position, verts[i_next].position]
+          # All loops — outer AND holes — so the hole contours (and their hard
+          # verticals) preview like the result, not just the outer perimeter.
+          face.loops.each do |loop|
+            verts = loop.vertices
+            edges = loop.edges
+            kept  = simplifiable_kept_indices(verts, edges)
+            loops << kept.map { |i| verts[i].position }
+            kept.length.times do |k|
+              e = edges[kept[k]]
+              next if e.soft? || e.curve
+              i_next = kept[(k + 1) % kept.length]
+              hard_edges << [verts[kept[k]].position, verts[i_next].position]
+            end
           end
           {
             normal:     face.normal,
             tris:       mesh.polygons.map { |tri| tri.map { |i| mesh.point_at(i.abs) } },
-            loop_pts:   kept_pts,
+            loops:      loops,
             hard_edges: hard_edges,
           }
         end
@@ -1294,7 +1307,10 @@ module ASM_Extensions
         edge_seen           = {}
         gfaces_set          = gfaces.to_set
         gfaces.each do |face|
-          face.outer_loop.edges.each do |edge|
+          # All loops, not just the outer one: hole (inner-loop) edges are real
+          # boundary edges too (count == 1), so they get their wall and contour
+          # drawn — otherwise coordinated mode shows no hole outline.
+          face.edges.each do |edge|
             next if edge_seen[edge]
             edge_seen[edge] = true
             count = edge_face_count[edge]
@@ -1951,11 +1967,14 @@ module ASM_Extensions
             holes = capture_panel_holes(faces.first)   # before pushpull
             faces.first.pushpull(h)
             move_panel_top_to_coordinated(group, normal, h)
-            # The hole top is lifted straight by pushpull; scale it toward its
-            # own centre by the same factor the coordinated outer contour
-            # shrinks, so the hole tapers with the block instead of staying a
-            # straight perpendicular shaft.
-            scale_panel_holes(group, normal, h, holes) if holes
+            # The hole top is lifted straight by pushpull, which is what we want
+            # for a normal extrusion (it stays a clean perpendicular shaft in the
+            # offset plane). ONLY when the panel was capped at a self-intersecting
+            # converging tip do we taper the holes toward the collapsing outer —
+            # otherwise scaling them toward the outer centroid drags them out of
+            # the panel (a self-intersecting protrusion).
+            converging = h.to_f.abs < height.to_f.abs - 1.0e-6
+            scale_panel_holes(group, normal, h, holes) if holes && converging
           elsif @both_sides
             # Symmetric solid: extrude the full thickness, then slide the body
             # back by half so it straddles the face plane (−h/2 … +h/2). The
@@ -1991,11 +2010,20 @@ module ASM_Extensions
       def scale_panel_holes(group, normal, height, data)
         xform     = group.transformation
         xform_inv = xform.inverse
+        inverted  = height.to_f < 0
+        fn_world  = normal.transform(xform)
         ob = data[:outer]
         cb = average_position(ob)
         ot = ob.map do |p|
-          disp = @coord_unit_disp_by_pos[pos_key(p.transform(xform))]
-          d    = disp ? disp.transform(xform_inv) : normal
+          # Use the SAME displacement move_panel_top_to_coordinated applied to
+          # the outer top (miter / subordinate / equidistant) — NOT the raw
+          # equidistant @coord_unit_disp_by_pos. When the outer is subordinate
+          # (its vertices dominated by a neighbour), the two diverge: the outer
+          # stays put while the raw equidistant would contract, so `s` reflected
+          # a contraction that never happened and the holes were dragged off the
+          # panel (poking out as a self-intersecting protrusion).
+          ctx = coordinated_disp_for(pos_key(p.transform(xform)), fn_world, inverted)
+          d   = ctx ? ctx.transform(xform_inv) : normal
           p.offset(d, height)
         end
         ct  = average_position(ot)
