@@ -8,11 +8,16 @@ module ASM_Extensions
 
       EXPECTED_KEYS = %i[
         use_last_extrusion default_extrusion align_to_min_bb
-        language context_menu dark_mode debug_mode
+        language context_menu dark_mode debug_mode preview_outline_limit
       ].freeze
 
-      # Keys sent by the frontend's currentSettings() — debug_mode is excluded intentionally
-      FRONTEND_KEYS = (EXPECTED_KEYS - %i[debug_mode]).freeze
+      # Keys in DEFAULT_CONFIG the frontend's currentSettings() does NOT send —
+      # internal tuning (debug toggle, preview outline cap), not surfaced in the
+      # settings dialog.
+      NON_FRONTEND_KEYS = %i[debug_mode preview_outline_limit].freeze
+
+      # Keys sent by the frontend's currentSettings().
+      FRONTEND_KEYS = (EXPECTED_KEYS - NON_FRONTEND_KEYS).freeze
 
       # --- DEFAULT_CONFIG ---
 
@@ -42,6 +47,11 @@ module ASM_Extensions
         assert val.is_a?(Numeric), "default_extrusion should be Numeric, got #{val.class}"
       end
 
+      def test_default_config_preview_outline_limit_is_numeric
+        val = DEFAULT_CONFIG[:preview_outline_limit]
+        assert val.is_a?(Numeric), "preview_outline_limit should be Numeric, got #{val.class}"
+      end
+
       def test_default_config_language_is_string
         assert_instance_of String, DEFAULT_CONFIG[:language]
       end
@@ -54,8 +64,8 @@ module ASM_Extensions
         FRONTEND_KEYS.each do |key|
           assert DEFAULT_CONFIG.key?(key), "DEFAULT_CONFIG missing frontend key: #{key}"
         end
-        assert_equal FRONTEND_KEYS.sort, (DEFAULT_CONFIG.keys - %i[debug_mode]).sort,
-          "Mismatch between frontend keys and DEFAULT_CONFIG keys (excluding debug_mode)"
+        assert_equal FRONTEND_KEYS.sort, (DEFAULT_CONFIG.keys - NON_FRONTEND_KEYS).sort,
+          "Mismatch between frontend keys and DEFAULT_CONFIG keys (excluding inner options)"
       end
 
       # --- user_settings ---
