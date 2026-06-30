@@ -399,6 +399,22 @@ module ASM_Extensions
           update_status_text
           return
         end
+        # While normal-locked, every click stays on the normal: a frozen
+        # distance just re-opens for adjustment along the same line — it never
+        # re-picks the origin/face. Only ESC leaves the lock. Recompute now (at
+        # the click position) so the preview updates without waiting for a move.
+        if @normal_lock && @distance_frozen
+          @distance_frozen         = false
+          @frozen_point            = nil
+          @pending_commit_distance = nil
+          @cursor_screen           = Geom::Point3d.new(x, y, 0)
+          pick_cursor(view, x, y)
+          @extrusion_distance      = compute_pick_distance(@cursor_ip)
+          update_vcb(nil, @extrusion_distance.to_s)
+          update_status_text
+          view.invalidate
+          return
+        end
         if @distance_frozen
           # A distance is already marked: this click starts a NEW measurement
           # — it becomes the start point and the next click marks the end. The
@@ -926,7 +942,7 @@ module ASM_Extensions
       # surface boundary, internal soft edges disappear into the skin).
       def draw_surface_extrusion_preview(view)
         raw_dist = @extrusion_distance
-        show_outlines  = show_preview_outlines?
+        internal = show_preview_outlines?   # below the limit: also draw internal edges
         gray_tris      = []
         gray_quads     = []
         gray_extras    = []   # fan-triangulated walls when the quad isn't planar
@@ -975,10 +991,14 @@ module ASM_Extensions
             end
           end
 
-          # Contour edges (hard corners, hard internal edges, boundary
-          # outline) — dropped wholesale on heavy selections so the per-frame
-          # accumulation and GL_LINES draw don't lag the preview.
-          if show_outlines
+          # Contour edges of the GENERATED result. Its exterior PERIMETER always
+          # draws — every non-seam boundary edge (the silhouette AND the exposed
+          # cantos at crossing corners, which are real exterior faces), below.
+          # The INTERNAL edges — junction corner verticals, a surface's internal
+          # ridges, and the coincident seams between continuous panels — are
+          # dropped on heavy selections (CONFIG[:preview_outline_limit]) so only
+          # the perimeter shows and the per-frame draw stays light.
+          if internal
             group[:hard_corner_verts].each_key do |corner|
               bs = surface_bottom_pt(corner, vert_base_disp, vert_pos, dist)
               ts = surface_top_pt(corner, vert_disp, vert_pos, dist)
@@ -992,19 +1012,17 @@ module ASM_Extensions
               te = surface_top_pt(v2, vert_disp, vert_pos, dist)
               hard_internal_lines.concat([bs, be, ts, te])
             end
+          end
 
-            group[:boundary].each do |v1, v2, _n, _seam, _buried|
-              # Every boundary edge — perimeter, seam AND buried cap — has its
-              # base and offset verticals as real hard edges in the result (each
-              # panel is its own solid), so draw both for all. Only the wall
-              # FILL is dropped for seams/caps (above); the outline always
-              # survives. (Verified edge-for-edge against the executed result,
-              # forward and inverted: 0 missing, 0 extra.)
-              outline_bottom << surface_bottom_pt(v1, vert_base_disp, vert_pos, dist)
-              outline_bottom << surface_bottom_pt(v2, vert_base_disp, vert_pos, dist)
-              outline_top << surface_top_pt(v1, vert_disp, vert_pos, dist)
-              outline_top << surface_top_pt(v2, vert_disp, vert_pos, dist)
-            end
+          group[:boundary].each do |v1, v2, _n, seam, _buried|
+            # A coincident internal seam draws only when internal edges are on;
+            # the exterior perimeter — every non-seam edge, including exposed
+            # cantos — always draws (those are real faces of the result).
+            next if seam && !internal
+            outline_bottom << surface_bottom_pt(v1, vert_base_disp, vert_pos, dist)
+            outline_bottom << surface_bottom_pt(v2, vert_base_disp, vert_pos, dist)
+            outline_top << surface_top_pt(v1, vert_disp, vert_pos, dist)
+            outline_top << surface_top_pt(v2, vert_disp, vert_pos, dist)
           end
 
         end
