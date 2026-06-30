@@ -880,28 +880,31 @@ module ASM_Extensions
         view.drawing_color = Sketchup::Color.new('white')
         view.draw(GL_TRIANGLES, white_tris)
 
-        return unless show_outlines
-
-        # Face outline at BOTH the base and the offset loop. The base loop used
-        # to be drawn only for both-sided extrusion (the original face was left
-        # to show through), but the ORIGINAL_FACE_BLUE fill now covers it, hiding
-        # the shared verticals between adjacent panels. So draw the base loop too
-        # — matching coordinated mode, which always draws its base outline.
+        # Face-boundary loops. The top offset loop (orange) marks where each face
+        # lands — the one cheap cue — so it ALWAYS draws, even above the outline
+        # limit where the heavier extras are dropped. That's the "face limits
+        # only" display on big selections: boundaries, no base contours, no
+        # cantos. Below the limit we add the base loop (blue, the original
+        # contour) and, further down, the hard canto/vertical edges. The base
+        # loop is drawn because the ORIGINAL_FACE_BLUE fill now covers the
+        # original face, hiding the shared verticals between adjacent panels.
         # Lifted toward the camera (see draw_surface_extrusion_preview) so an
-        # outline coplanar with an adjacent panel's face wins the z-fight
-        # instead of vanishing into it. The base loop (the original face, like
-        # its fill) stays blue; the offset loop (the new top) is orange.
+        # outline coplanar with an adjacent panel's face wins the z-fight instead
+        # of vanishing into it.
         @preview_cache.each do |data|
           n = data[:normal]
           data[:loops].each do |loop_pts|
             view.drawing_color = ORANGE
             view.draw(GL_LINE_LOOP, lift_off_face(loop_pts.map { |p| p.offset(n, hi) }, view, 5))
+            next unless show_outlines
             view.drawing_color = PREVIEW_BLUE
             view.draw(GL_LINE_LOOP, lift_off_face(loop_pts.map { |p| p.offset(n, lo) }, view, 5))
           end
         end
 
-        # Top and vertical hard edges — new, so orange.
+        # Top and vertical hard edges (the cantos) — new, so orange. Dropped
+        # above the limit (hard_lines is only collected when show_outlines).
+        return unless show_outlines
         view.drawing_color = ORANGE
         view.draw(GL_LINES, lift_off_face(hard_lines, view, 5)) unless hard_lines.empty?
       end
@@ -1014,11 +1017,13 @@ module ASM_Extensions
             end
           end
 
-          group[:boundary].each do |v1, v2, _n, seam, _buried|
-            # A coincident internal seam draws only when internal edges are on;
-            # the exterior perimeter — every non-seam edge, including exposed
-            # cantos — always draws (those are real faces of the result).
-            next if seam && !internal
+          group[:boundary].each do |v1, v2, _n, seam, _buried, crease|
+            # A coincident internal seam (flat same-orientation run) draws only
+            # when internal edges are on. The exterior perimeter — every non-seam
+            # edge, including exposed cantos — always draws, as does a crease seam
+            # (panels bending across a faceted surface, e.g. a sphere's poles):
+            # those are real visible edges of the result, not coincident ones.
+            next if seam && !crease && !internal
             outline_bottom << surface_bottom_pt(v1, vert_base_disp, vert_pos, dist)
             outline_bottom << surface_bottom_pt(v2, vert_base_disp, vert_pos, dist)
             outline_top << surface_top_pt(v1, vert_disp, vert_pos, dist)
@@ -1237,28 +1242,41 @@ module ASM_Extensions
           disp  = nil
           bdisp = nil
           if coord
-            k   = pos_key(p)
-            inv = @extrusion_distance.to_f < 0
-            # Per-wall miter (forward) keeps every wall at consistent thickness;
-            # it also subsumes the run/partition flush. Falls through to the
-            # equidistant/subordinate path for non-wall (SurfaceUp) or inverted.
-            mm  = inv ? coord[:miter_disp_inv] : coord[:miter_disp]
-            md  = mm ? mm[[[k[0], k[1]], norm_key(vf.first.normal)]] : nil
-            if md
-              disp = md
+            k = pos_key(p)
+            if @mode == :face
+              inv = @extrusion_distance.to_f < 0
+              # Per-wall miter (forward) keeps every wall at consistent
+              # thickness; it also subsumes the run/partition flush. Falls
+              # through to the equidistant/subordinate path for inverted.
+              mm  = inv ? coord[:miter_disp_inv] : coord[:miter_disp]
+              md  = mm ? mm[[[k[0], k[1]], norm_key(vf.first.normal)]] : nil
+              if md
+                disp = md
+              else
+                dom = coord[:dominant_by_pos] && coord[:dominant_by_pos][k]
+                subordinate = dom && dom.any? && vf.none? { |f| dom.any? { |dn| dn.parallel?(f.normal) } }
+                shared = coord[:unit_disp_by_pos][k]
+                if subordinate
+                  sd   = subordinate_disp(vf.first.normal, dom, inv)
+                  disp = subordinate_overshoots?(sd) ? shared : sd
+                else
+                  disp = shared
+                end
+              end
+              # Inverted coordinated FACE mode only: the executor
+              # (move_panel_top_to_coordinated) also slides a subordinate panel's
+              # BASE end into the neighbour run's offset plane (subordinate_base_shift),
+              # keeping base and mitered top parallel — a clean parallelogram.
+              # Without replicating it the preview keeps the untrimmed base and
+              # shows the panel as a trapezoid (the "bevel" on interior faces).
+              bdisp = preview_base_disp(p, vf.first.normal, coord) if inv
             else
-              dom = coord[:dominant_by_pos] && coord[:dominant_by_pos][k]
-              subordinate = dom && dom.any? && vf.none? { |f| dom.any? { |dn| dn.parallel?(f.normal) } }
-              disp = subordinate ? subordinate_disp(vf.first.normal, dom, inv) : coord[:unit_disp_by_pos][k]
+              # SurfaceUp: the welded-surface executor (extrude_surface) lifts
+              # every vertex by the shared per-position offset only — no miter,
+              # no subordinate panel logic (those are FaceUp panel concepts).
+              # Mirror it exactly so the preview can't drift from the result.
+              disp = coord[:unit_disp_by_pos][k]
             end
-            # Inverted coordinated FACE mode only: the executor
-            # (move_panel_top_to_coordinated) also slides a subordinate panel's
-            # BASE end into the neighbour run's offset plane (subordinate_base_shift),
-            # keeping base and mitered top parallel — a clean parallelogram.
-            # Without replicating it the preview keeps the untrimmed base and
-            # shows the panel as a trapezoid (the "bevel" on interior faces).
-            # SurfaceUp's executor doesn't trim, so it's scoped out here.
-            bdisp = preview_base_disp(p, vf.first.normal, coord) if inv && @mode == :face
           end
           unless disp
             top1 = compute_offset_vertex(p, vf.map(&:normal), 1.0)
@@ -1367,7 +1385,19 @@ module ASM_Extensions
               k2 = pos_key(v2.position)
               buried = !!(vert_base_disp[v1] && vert_base_disp[v2] &&
                           k1[0] == k2[0] && k1[1] == k2[1])
-              boundary << [v1, v2, face.normal, seam, buried]
+              # A seam between panels of DIFFERENT orientation (a faceted
+              # surface's creases — a sphere's poles, a dome) is a visible edge
+              # of the result, not a coincident internal one: the panels bend
+              # across it, so the wall stays exposed. Only a same-orientation
+              # run's seam (parallel neighbours, coplanar) truly dissolves. Flag
+              # the crease so the draw keeps it even in perimeter-only mode,
+              # where flat-run seams are dropped for performance.
+              crease = false
+              if seam
+                nbrs = coord[:shared_edge_normals] && coord[:shared_edge_normals][epk]
+                crease = !!(nbrs && nbrs.any? { |nn| !nn.parallel?(face.normal) })
+              end
+              boundary << [v1, v2, face.normal, seam, buried, crease]
             elsif count == 2
               # Internal edge — predict hard top counterpart when the two
               # adjacent faces bend > 60°.
@@ -1975,6 +2005,7 @@ module ASM_Extensions
             # the panel (a self-intersecting protrusion).
             converging = h.to_f.abs < height.to_f.abs - 1.0e-6
             scale_panel_holes(group, normal, h, holes) if holes && converging
+            soften_coordinated_fold_edges(group)
           elsif @both_sides
             # Symmetric solid: extrude the full thickness, then slide the body
             # back by half so it straddles the face plane (−h/2 … +h/2). The
@@ -2102,6 +2133,26 @@ module ASM_Extensions
       # move; the rest, and panels with no selected neighbour, stay where
       # pushpull put them. Neighbouring panels resolve a shared vertex to the
       # same world point, so their walls coincide and the panels meet flush.
+      # A coordinated panel's four top corners each move by their own offset, so
+      # on a curved surface the top quad (and any skewed wall quad) is no longer
+      # planar — SketchUp auto-triangulates it and leaves the new diagonal HARD,
+      # a visible crease across what should read as one smooth panel. Soften the
+      # folds: an interior edge whose two faces meet within 60° is a
+      # triangulation artifact, not a real crease, so it goes soft + smooth.
+      # Structural edges (top/bottom contour, vertical corners) meet near 90° and
+      # stay hard. Mirrors the > 60° rule classify_shell_edges applies in surface
+      # mode, keeping the two modes consistent. casts_shadows is left untouched
+      # (same as classify_shell_edges) so QuadFaceTools isn't tripped.
+      def soften_coordinated_fold_edges(group)
+        group.entities.grep(Sketchup::Edge).each do |e|
+          fs = e.faces
+          next unless fs.size == 2
+          next if fs[0].normal.dot(fs[1].normal) < 0.5  # sharp (> 60°): keep hard
+          e.soft   = true
+          e.smooth = true
+        end
+      end
+
       def move_panel_top_to_coordinated(group, normal, height)
         xform     = group.transformation
         xform_inv = xform.inverse
@@ -2555,6 +2606,13 @@ module ASM_Extensions
       # is exact: V_top = V_orig + (h/(1+cos θ))·(n₁+n₂). When the system
       # is singular (all normals coplanar, or anti-parallel pair) we fall
       # back to extruding along the averaged direction.
+      #
+      # OFFSET_OVERSHOOT_CAP guards the ill-conditioned middle ground: when the
+      # adjacent faces are near-coplanar (but not parallel enough to be merged)
+      # the equidistant solution is finite yet wild — it runs off sideways to
+      # many times the offset distance. Past this ratio we treat it as a
+      # degenerate miter and fall back to the bounded averaged direction.
+      OFFSET_OVERSHOOT_CAP = 3.0
       def compute_offset_vertex(position, normals, height)
         return position if normals.empty?
         return position.offset(normals.first, height) if normals.size == 1
@@ -2568,14 +2626,29 @@ module ASM_Extensions
         if normals.size == 2
           n1, n2 = normals
           cos_t  = n1.dot(n2)
-          # Anti-parallel: planes coincide on opposite sides; the bisector
-          # direction is undefined. Pick either normal.
-          return position.offset(n1, height) if (1.0 + cos_t).abs < 1e-9
-          t = height.to_f / (1.0 + cos_t)
-          return Geom::Point3d.new(
-            position.x + t * (n1.x + n2.x),
-            position.y + t * (n1.y + n2.y),
-            position.z + t * (n1.z + n2.z),
+          # Near-anti-parallel planes: the bisector blows up (t = h/(1+cos θ)
+          # → ∞ as cos θ → −1), so the miter point shoots off sideways just like
+          # the ill-conditioned N≥3 case. Accept the bisector only while it stays
+          # within the overshoot cap; otherwise fall through to the averaged
+          # direction below. The exact anti-parallel guard (|1+cos θ| < 1e-9)
+          # is now subsumed by the cap check.
+          unless (1.0 + cos_t).abs < 1e-9
+            t  = height.to_f / (1.0 + cos_t)
+            wx = t * (n1.x + n2.x)
+            wy = t * (n1.y + n2.y)
+            wz = t * (n1.z + n2.z)
+            if Math.sqrt(wx * wx + wy * wy + wz * wz) <= OFFSET_OVERSHOOT_CAP * height.to_f.abs
+              return Geom::Point3d.new(position.x + wx, position.y + wy, position.z + wz)
+            end
+          end
+          # Anti-parallel or capped overshoot — averaged direction (bounded).
+          sx = n1.x + n2.x
+          sy = n1.y + n2.y
+          sz = n1.z + n2.z
+          slen = Math.sqrt(sx * sx + sy * sy + sz * sz)
+          return position.offset(n1, height) if slen < 1e-6
+          return position.offset(
+            Geom::Vector3d.new(sx / slen, sy / slen, sz / slen), height
           )
         end
 
@@ -2595,13 +2668,20 @@ module ASM_Extensions
         c = sum_n.map { |s| s * height.to_f }
 
         w = solve_3x3(a, c)
-        if w
+        # Accept the equidistant solution unless it OVERSHOOTS: where adjacent
+        # faces are near-coplanar (a faceted sphere's poles, shallow domes) the
+        # system is ill-conditioned — not singular, so solve_3x3 returns a valid
+        # but wild displacement that runs off sideways (seen at up to ~29× the
+        # offset distance). Cap it; beyond a few × the distance, fall through to
+        # the bounded averaged-direction offset (a clean radial shell) instead
+        # of a spike.
+        if w && w.length <= OFFSET_OVERSHOOT_CAP * height.to_f.abs
           return Geom::Point3d.new(position.x + w.x, position.y + w.y, position.z + w.z)
         end
 
-        # Singular system — every normal lies in a common plane (or the
-        # set degenerates). Fall back to the averaged-direction extrusion
-        # so we still produce something usable along the dominant axis.
+        # Singular system OR a capped overshoot — every normal lies in (or near)
+        # a common plane. Fall back to the averaged-direction extrusion so we
+        # still produce something usable along the dominant axis.
         sum_x, sum_y, sum_z = sum_n
         sum_len = Math.sqrt(sum_x * sum_x + sum_y * sum_y + sum_z * sum_z)
         return position.offset(normals.first, height) if sum_len < 1e-6
@@ -2661,7 +2741,8 @@ module ASM_Extensions
         return nil unless disp
         dom = @coord_dominant_by_pos && @coord_dominant_by_pos[k]
         if dom && dom.any? && dom.none? { |dn| dn.parallel?(face_normal_world) }
-          return subordinate_disp(face_normal_world, dom, inverted)
+          sd = subordinate_disp(face_normal_world, dom, inverted)
+          return subordinate_overshoots?(sd) ? disp : sd
         end
         disp
       end
@@ -2685,6 +2766,17 @@ module ASM_Extensions
         Geom::Vector3d.new(a * face_normal.x + b * nd.x,
                            a * face_normal.y + b * nd.y,
                            a * face_normal.z + b * nd.z)
+      end
+
+      # subordinate_disp blows up (a = 1/(1 − c²) → ∞) as the subordinate face
+      # approaches parallel with the dominant run — a faceted sphere's poles,
+      # where every face is near-parallel to the near-flat cap run. Past the
+      # overshoot cap there is no usable subordinate miter, so the caller must
+      # fall back to the *shared* per-position offset (unit_disp_by_pos), not
+      # the face's own normal: every face at that vertex then agrees on one top
+      # point and the panels stay joined instead of splaying into gaps.
+      def subordinate_overshoots?(disp)
+        disp.length > OFFSET_OVERSHOOT_CAP
       end
 
       # Cluster near-parallel vectors, counting how many fell into each.

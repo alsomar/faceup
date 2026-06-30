@@ -232,12 +232,24 @@ module ASM_Extensions
 
       def test_meta_bottom_outer_and_hole_use_vertex_position
         v = FakeVertex.new(pt(4, 4, 0))
-        assert_point pt(4, 4, 0), @tool.send(:surface_meta_bottom, [:v, v])
-        assert_point pt(4, 4, 0), @tool.send(:surface_meta_bottom, [:hole, v])
+        vert_pos = { v => pt(4, 4, 0) }
+        # No base trim stored (forward / non-subordinate) → bottom is the
+        # untouched vertex position for both outer and hole points.
+        assert_point pt(4, 4, 0), @tool.send(:surface_meta_bottom, [:v, v], {}, vert_pos, 10.0)
+        assert_point pt(4, 4, 0), @tool.send(:surface_meta_bottom, [:hole, v], {}, vert_pos, 10.0)
+      end
+
+      def test_meta_bottom_slides_by_base_trim
+        v = FakeVertex.new(pt(4, 4, 0))
+        vert_pos       = { v => pt(4, 4, 0) }
+        # Inverted subordinate panel: the base slides into the neighbour run's
+        # offset plane by dist · base_disp, matching the executed result.
+        vert_base_disp = { v => vec(1, 0, 0) }
+        assert_point pt(14, 4, 0), @tool.send(:surface_meta_bottom, [:v, v], vert_base_disp, vert_pos, 10.0)
       end
 
       def test_meta_bottom_interior_uses_stored_point
-        assert_point pt(1, 1, 0), @tool.send(:surface_meta_bottom, [:interior, pt(1, 1, 0), vec(0, 0, 1)])
+        assert_point pt(1, 1, 0), @tool.send(:surface_meta_bottom, [:interior, pt(1, 1, 0), vec(0, 0, 1)], {}, {}, 10.0)
       end
 
       def test_meta_top_outer_lifts_by_displacement
