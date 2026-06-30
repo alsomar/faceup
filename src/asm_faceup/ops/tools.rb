@@ -1835,7 +1835,18 @@ module ASM_Extensions
         # Without this the angular sweep can latch onto a transverse neighbour
         # (the sweep direction flips when inverted, negating the normals) and
         # bend a straight run into an angled face.
-        return straight if walls.any? { |x| !x.equal?(w) && x[:n].dot(n) > PARALLEL_NORMAL_COS_THRESHOLD }
+        #
+        # A genuine continuation extends the run the OTHER way past the vertex,
+        # so its footprint direction is anti-parallel to ours (dir·d < 0). A
+        # sibling wall sharing this vertex with the SAME direction (dir·d > 0) is
+        # not a continuation — it's the same wall subdivided (stacked "brick"
+        # faces at one plan position, all with the same normal). Excluding those
+        # is what lets a subdivided wall still miter at its corners instead of
+        # every brick tripping this guard and butting straight.
+        return straight if walls.any? { |x|
+          !x.equal?(w) && x[:n].dot(n) > PARALLEL_NORMAL_COS_THRESHOLD &&
+            x[:dir].dot(d) < 0.0
+        }
 
         ccw = (d.x * n.y - d.y * n.x) > 0   # is n 90° CCW from d?
         best = nil; best_ang = nil

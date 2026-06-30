@@ -51,6 +51,26 @@ module ASM_Extensions
         wall(center, [center[0] + len * dx, center[1] + len * dy], [-dy, dx])
       end
 
+      # A wall split into `layers` stacked faces (same plan footprint, stacked in
+      # z) — a subdivided / "bricked" wall. Every layer shares the corner plan
+      # position with the same normal, which used to trip the collinear-run guard
+      # in wall_miter_corner and butt the corner straight instead of mitering.
+      def wall_bricks(p1, p2, want, layers = 3, h = 39)
+        dz = h.to_f / layers
+        (0...layers).map do |i|
+          z0 = i * dz
+          z1 = (i + 1) * dz
+          f = @group.entities.add_face(
+            Geom::Point3d.new(p1[0], p1[1], z0),
+            Geom::Point3d.new(p2[0], p2[1], z0),
+            Geom::Point3d.new(p2[0], p2[1], z1),
+            Geom::Point3d.new(p1[0], p1[1], z1))
+          n = f.normal
+          f.reverse! if n.x * want[0] + n.y * want[1] < 0
+          f
+        end
+      end
+
       # Run coordinated FaceUp on `faces`, return the result groups.
       def extrude(faces, height)
         t = FaceUpTool.new
@@ -102,6 +122,21 @@ module ASM_Extensions
         groups = extrude(faces, 12)
         assert_equal [12.0, 12.0], thicknesses(groups).sort
         assert groups.all?(&:manifold?), 'L-corner walls should be manifold'
+      end
+
+      # Same L-corner but each wall is subdivided into stacked brick faces. The
+      # miter must still reach the diagonal outer corner (−12, −12) instead of
+      # butting straight and leaving a notch — a sibling brick at the corner
+      # shares the normal but not the run direction, so it must not be mistaken
+      # for a collinear run continuation.
+      def test_subdivided_l_corner_still_miters
+        faces  = wall_bricks([0, 0], [60, 0], [0, -1]) +
+                 wall_bricks([0, 0], [0, 60], [-1, 0])
+        groups = extrude(faces, 12)
+        assert groups.all?(&:manifold?), 'subdivided L-corner walls should be manifold'
+        verts = base_verts_near(groups, [-12, -12], 3)
+        assert vertex_at?(verts, [-12, -12], 1.0),
+               'subdivided wall L-corner should miter to the diagonal (-12,-12), not butt straight'
       end
 
       def test_y_junction_three_walls_consistent_thickness
